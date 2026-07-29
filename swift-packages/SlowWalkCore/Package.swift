@@ -4,6 +4,10 @@ import PackageDescription
 
 let package = Package(
     name: "SlowWalkCore",
+    platforms: [
+        .iOS(.v17),
+        .macOS(.v14)
+    ],
     products: [
         .library(name: "SlowWalkDomain", targets: ["SlowWalkDomain"]),
         .library(name: "SlowWalkRiskEngine", targets: ["SlowWalkRiskEngine"]),

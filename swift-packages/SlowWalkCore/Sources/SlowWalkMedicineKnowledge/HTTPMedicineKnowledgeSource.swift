@@ -1,6 +1,7 @@
 import Foundation
 import SlowWalkDomain
 
+@available(macOS 14.0, iOS 17.0, *)
 public struct HTTPMedicineKnowledgeSourceConfiguration:
     Sendable,
     Equatable
@@ -50,6 +51,7 @@ public struct HTTPMedicineKnowledgeSourceConfiguration:
     }
 }
 
+@available(macOS 14.0, iOS 17.0, *)
 public struct HTTPMedicineKnowledgeSource:
     MedicineKnowledgeSource,
     Sendable
@@ -359,6 +361,7 @@ public struct HTTPMedicineKnowledgeSource:
     }
 }
 
+@available(macOS 14.0, iOS 17.0, *)
 public struct MedicineKnowledgeHTTPPayload:
     Codable,
     Sendable,

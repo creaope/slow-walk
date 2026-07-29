@@ -22,6 +22,7 @@ public protocol MedicineKnowledgeSearching: Sendable {
     ) async throws -> MedicineKnowledgeSearchResult
 }
 
+@available(macOS 14.0, iOS 17.0, *)
 public protocol HTTPTransporting: Sendable {
     func send(
         _ request: HTTPTransportRequest
