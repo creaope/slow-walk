@@ -76,6 +76,7 @@ public enum HTTPTransportError:
     case networkFailure
 }
 
+@available(macOS 14.0, iOS 17.0, *)
 public struct URLSessionHTTPTransport:
     HTTPTransporting,
     Sendable

@@ -1,6 +1,7 @@
 import Foundation
 import SlowWalkDomain
 
+@available(macOS 14.0, iOS 17.0, *)
 public actor MockHTTPTransport: HTTPTransporting {
     public typealias Handler = @Sendable (
         HTTPTransportRequest
@@ -26,6 +27,7 @@ public actor MockHTTPTransport: HTTPTransporting {
     }
 }
 
+@available(macOS 14.0, iOS 17.0, *)
 public actor DemoMockHTTPTransport: HTTPTransporting {
     private let medicines: [Medicine]
     private let fetchedAt: Date
@@ -171,6 +173,7 @@ public actor DemoMockHTTPTransport: HTTPTransporting {
     }
 }
 
+@available(macOS 14.0, iOS 17.0, *)
 public struct MockAuthoritativeMedicineSource:
     MedicineKnowledgeSource,
     Sendable
@@ -245,6 +248,7 @@ public struct MockAuthoritativeMedicineSource:
     }
 }
 
+@available(macOS 14.0, iOS 17.0, *)
 public struct MockSecondaryMedicineSource:
     MedicineKnowledgeSource,
     Sendable

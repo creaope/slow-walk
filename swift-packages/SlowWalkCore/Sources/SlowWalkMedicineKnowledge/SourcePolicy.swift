@@ -4,10 +4,11 @@ public struct SourcePolicy:
     Sendable,
     Equatable
 {
+    @available(macOS 14.0, iOS 17.0, *)
     public static let demo = SourcePolicy(
         allowedSourceIdentifiers: [
-            MockAuthoritativeMedicineSource.identifier,
-            MockSecondaryMedicineSource.identifier,
+            "mock-authoritative-medicine-source",
+            "mock-secondary-medicine-source",
         ],
         maximumSourceAge: 30 * 24 * 60 * 60,
         maximumFutureSkew: 5 * 60,
