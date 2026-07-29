@@ -10,11 +10,23 @@
 		7C153878301849410049DF05 /* SlowWalkAPIContracts in Frameworks */ = {isa = PBXBuildFile; productRef = 7C153877301849410049DF05 /* SlowWalkAPIContracts */; };
 		7C15387A301849410049DF05 /* SlowWalkClientCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7C153879301849410049DF05 /* SlowWalkClientCore */; };
 		7C15387C301849410049DF05 /* SlowWalkDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 7C15387B301849410049DF05 /* SlowWalkDomain */; };
+		7CFA0B010000000000000010 /* SlowWalkDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 7CFA0B020000000000000011 /* SlowWalkDomain */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		7C96080A3018333F0081BCFA /* SlowWalkApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SlowWalkApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		7CFA0A010000000000000001 /* SlowWalkAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SlowWalkAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXContainerItemProxy section */
+		7CFA0A070000000000000007 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7C9608023018333F0081BCFA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7C9608093018333F0081BCFA;
+			remoteInfo = SlowWalkApp;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
 		7C153881301850F80049DF05 /* Exceptions for "SlowWalkApp" folder in "SlowWalkApp" target */ = {
@@ -36,6 +48,11 @@
 			path = SlowWalkApp;
 			sourceTree = "<group>";
 		};
+		7CFA0A020000000000000002 /* SlowWalkAppTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = SlowWalkAppTests;
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -49,6 +66,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7CFA0A040000000000000004 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7CFA0B010000000000000010 /* SlowWalkDomain in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -56,6 +81,7 @@
 			isa = PBXGroup;
 			children = (
 				7C96080C3018333F0081BCFA /* SlowWalkApp */,
+				7CFA0A020000000000000002 /* SlowWalkAppTests */,
 				7C96080B3018333F0081BCFA /* Products */,
 			);
 			sourceTree = "<group>";
@@ -64,6 +90,7 @@
 			isa = PBXGroup;
 			children = (
 				7C96080A3018333F0081BCFA /* SlowWalkApp.app */,
+				7CFA0A010000000000000001 /* SlowWalkAppTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -96,6 +123,30 @@
 			productReference = 7C96080A3018333F0081BCFA /* SlowWalkApp.app */;
 			productType = "com.apple.product-type.application";
 		};
+		7CFA0A060000000000000006 /* SlowWalkAppTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7CFA0A0B000000000000000B /* Build configuration list for PBXNativeTarget "SlowWalkAppTests" */;
+			buildPhases = (
+				7CFA0A030000000000000003 /* Sources */,
+				7CFA0A040000000000000004 /* Frameworks */,
+				7CFA0A050000000000000005 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				7CFA0A080000000000000008 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				7CFA0A020000000000000002 /* SlowWalkAppTests */,
+			);
+			name = SlowWalkAppTests;
+			packageProductDependencies = (
+				7CFA0B020000000000000011 /* SlowWalkDomain */,
+			);
+			productName = SlowWalkAppTests;
+			productReference = 7CFA0A010000000000000001 /* SlowWalkAppTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -108,6 +159,10 @@
 				TargetAttributes = {
 					7C9608093018333F0081BCFA = {
 						CreatedOnToolsVersion = 26.6;
+					};
+					7CFA0A060000000000000006 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = 7C9608093018333F0081BCFA /* SlowWalkApp */;
 					};
 				};
 			};
@@ -129,12 +184,20 @@
 			projectRoot = "";
 			targets = (
 				7C9608093018333F0081BCFA /* SlowWalkApp */,
+				7CFA0A060000000000000006 /* SlowWalkAppTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		7C9608083018333F0081BCFA /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7CFA0A050000000000000005 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -151,7 +214,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7CFA0A030000000000000003 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		7CFA0A080000000000000008 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7C9608093018333F0081BCFA /* SlowWalkApp */;
+			targetProxy = 7CFA0A070000000000000007 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		7C960813301833410081BCFA /* Debug */ = {
@@ -353,6 +431,52 @@
 			};
 			name = Release;
 		};
+		7CFA0A090000000000000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.creaope.slowwalk.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SlowWalkApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SlowWalkApp";
+			};
+			name = Debug;
+		};
+		7CFA0A0A000000000000000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.creaope.slowwalk.tests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/SlowWalkApp.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/SlowWalkApp";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -370,6 +494,15 @@
 			buildConfigurations = (
 				7C960816301833410081BCFA /* Debug */,
 				7C960817301833410081BCFA /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7CFA0A0B000000000000000B /* Build configuration list for PBXNativeTarget "SlowWalkAppTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7CFA0A090000000000000009 /* Debug */,
+				7CFA0A0A000000000000000A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
@@ -393,6 +526,10 @@
 			productName = SlowWalkClientCore;
 		};
 		7C15387B301849410049DF05 /* SlowWalkDomain */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SlowWalkDomain;
+		};
+		7CFA0B020000000000000011 /* SlowWalkDomain */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SlowWalkDomain;
 		};
