@@ -1,6 +1,7 @@
 import Foundation
 import SlowWalkDomain
 
+@available(macOS 14.0, iOS 17.0, *)
 public struct MedicineKnowledgeService:
     MedicineKnowledgeSearching,
     Sendable
