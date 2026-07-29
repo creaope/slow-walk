@@ -1,5 +1,40 @@
 import Foundation
 
+/// The wall of waiting between starting a read and resolving it.
+///
+/// Isolated behind a protocol so a read can be driven deterministically in
+/// tests: the production double sleeps for the demo duration, while a test
+/// double parks on a continuation the test releases at a chosen moment. This
+/// is the seam that makes the stale-read race observable without a real clock.
+@MainActor
+protocol MedicineReadDelaying {
+    /// Blocks the caller until the simulated read should resolve.
+    func wait() async throws
+}
+
+/// Produces the outcome of a simulated medicine scan for a given attempt.
+///
+/// Isolated behind a protocol so tests can swap in a spy that records calls,
+/// instead of the demo double that hands out a fixed script.
+@MainActor
+protocol MedicineScanSimulating {
+    func outcome(forAttemptNumber attemptNumber: Int)
+        -> MockMedicineScanSimulator.Outcome?
+}
+
+/// Production read delay: sleeps for the simulated read duration.
+///
+/// A struct is enough — it holds no state — and under the project's
+/// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` it is main-actor isolated, so
+/// it satisfies the `@MainActor` `MedicineReadDelaying` protocol.
+struct ContinuousMedicineReadDelay: MedicineReadDelaying {
+    func wait() async throws {
+        try await Task.sleep(
+            for: MockMedicineScanSimulator.simulatedReadDuration
+        )
+    }
+}
+
 /// Drives the demo medicine-reading step without any camera or OCR.
 ///
 /// The real reader will be a `MedicineTextRecognizing` adapter backed by
@@ -8,7 +43,7 @@ import Foundation
 /// through and reviewed before any platform capability is wired up.
 ///
 /// DEMO DATA — NOT FOR CLINICAL USE.
-struct MockMedicineScanSimulator {
+struct MockMedicineScanSimulator: MedicineScanSimulating {
     /// What the next simulated read should do.
     enum Outcome: Equatable, Hashable {
         case doesNotSucceed(MedicineReadSetback)

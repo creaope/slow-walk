@@ -11,7 +11,8 @@ final class CompanionSessionModel {
     private(set) var state: CompanionFlowState = .notStarted
 
     private let records: any CareRecordStoring
-    private let simulator: MockMedicineScanSimulator
+    private let simulator: any MedicineScanSimulating
+    private let readDelay: any MedicineReadDelaying
     private let plan: TodayPlan
 
     /// Guards against a stale simulated read landing after the person has
@@ -19,13 +20,20 @@ final class CompanionSessionModel {
     /// Only `invalidatePendingRead()` moves it.
     private var readGeneration = 0
 
+    /// The in-flight simulated read, exposed read-only so tests can await the
+    /// exact task whose staleness they are probing. The setter stays private;
+    /// only `recordReadStartedAndRun()` starts a read.
+    private(set) var pendingReadTask: Task<Void, Never>?
+
     init(
         records: any CareRecordStoring,
-        simulator: MockMedicineScanSimulator,
-        plan: TodayPlan
+        simulator: any MedicineScanSimulating = MockMedicineScanSimulator.demo,
+        plan: TodayPlan,
+        readDelay: any MedicineReadDelaying = ContinuousMedicineReadDelay()
     ) {
         self.records = records
         self.simulator = simulator
+        self.readDelay = readDelay
         self.plan = plan
     }
 
@@ -158,8 +166,12 @@ final class CompanionSessionModel {
 
         records.append(.medicineReadStarted(attemptNumber: attemptNumber))
 
-        Task { [weak self] in
-            try? await Task.sleep(for: MockMedicineScanSimulator.simulatedReadDuration)
+        pendingReadTask = Task { [weak self] in
+            do {
+                try await self?.readDelay.wait()
+            } catch {
+                return
+            }
             guard let self, self.readGeneration == generation else { return }
             self.finishRead(forAttemptNumber: attemptNumber)
         }
