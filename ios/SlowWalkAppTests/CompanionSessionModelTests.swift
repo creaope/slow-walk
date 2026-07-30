@@ -174,6 +174,13 @@ struct CompanionSessionModelTests {
         delay.release()
         if let staleTask { await staleTask.value }
 
+        // The record set alone cannot prove the generation guard: from
+        // `.completed` the reducer independently refuses every read result, so
+        // the timeline stays clean even with the guard removed. Asserting the
+        // simulator was never consulted is what makes this test fail if the
+        // guard goes away — the stale read must stop *before* finishRead.
+        #expect(spy.outcomeCalls.isEmpty)
+
         // Exactly the legitimate records: the day-plan start, the read start,
         // and the early finish. Nothing from the stale read's resolution.
         let outingTitle = TodayPlan.demo.outing?.title ?? "今日用药"
@@ -317,6 +324,52 @@ struct CompanionSessionModelTests {
             .medicineReadStarted(attemptNumber: 2),
             .medicineReadFoundCandidates(candidateCount: MedicineCandidate.demoCandidates.count),
         ])
+    }
+
+    // MARK: - Confirming a medicine that was never offered
+
+    /// A confirmation is only meaningful for a candidate the person was
+    /// actually shown. The reducer refuses an unoffered candidate, and the
+    /// records must refuse it too: a `medicineConfirmed` event for a medicine
+    /// that was never on screen would put a false medicine in the care
+    /// timeline, which is the one thing this record must never do.
+    @Test func confirmingUnofferedCandidateWritesNoRecords() async {
+        let spy = SpyScanSimulator(
+            scriptedOutcome: .findsCandidates(MedicineCandidate.demoCandidates)
+        )
+        let delay = ControllableReadDelay()
+        let store = RecordingCareRecordStore()
+        let session = CompanionSessionModel(
+            records: store, simulator: spy, plan: .demo, readDelay: delay
+        )
+
+        #expect(session.startCompanion())
+        session.beginMedicineRead()
+        await delay.waitForInstall()
+        #expect(delay.release())
+        if let task = session.pendingReadTask { await task.value }
+
+        // The read offered demoCandidates; this one was never among them.
+        let unoffered = MedicineCandidate(
+            id: "not-offered",
+            displayName: "未曾出现的药",
+            recognitionHint: "不在候选中"
+        )
+        session.confirmMedicine(unoffered)
+
+        // The state did not move on...
+        guard case .awaitingMedicineConfirmation = session.state else {
+            Issue.record("expected to stay awaiting confirmation, got \(session.state)")
+            return
+        }
+
+        // ...and nothing was recorded for it.
+        let confirmed = store.kinds.contains { kind in
+            if case .medicineConfirmed = kind { return true }
+            if case .careActionShown = kind { return true }
+            return false
+        }
+        #expect(confirmed == false)
     }
 
     // MARK: - Helpers
