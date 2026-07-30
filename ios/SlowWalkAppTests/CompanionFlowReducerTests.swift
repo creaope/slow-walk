@@ -93,8 +93,19 @@ struct CompanionFlowReducerTests {
                     attemptNumber: 1
                 )
             ),
-            .showingRiskAction(
-                ConfirmedMedicine(candidate: MedicineCandidate.demoCandidates[0], origin: .readFromPhoto)
+            .awaitingMedicineAssessment(
+                MedicineAssessmentGate(
+                    confirmed: ConfirmedMedicine(
+                        candidate: MedicineCandidate.demoCandidates[0],
+                        origin: .readFromPhoto
+                    ),
+                    prompt: MedicineConfirmationPrompt(
+                        candidates: MedicineCandidate.demoCandidates,
+                        origin: .readFromPhoto,
+                        attemptNumber: 1
+                    ),
+                    progress: .notStarted
+                )
             ),
             .travelling,
             .approachingStop,

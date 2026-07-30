@@ -25,9 +25,16 @@ struct CareRecordsView: View {
                     }
                 }
 
-                Text("本阶段记录只保存在内存中，重新启动后会清空。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+                // From the app-level capability source, not a fixed string: if
+                // records ever become persistent, this line changes with the
+                // table instead of being corrected here.
+                Text(
+                    environment.capabilities
+                        .detail(of: .careRecordPersistence)
+                        ?? "记录只保存在内存中，重新启动后会清空。"
+                )
+                .font(.footnote)
+                .foregroundStyle(.secondary)
             }
             .padding()
         }
@@ -87,12 +94,17 @@ struct CareRecordsView: View {
         case let .medicineConfirmed(medicineName, origin):
             switch origin {
             case .readFromPhoto:
-                "已确认药名：\(medicineName)（照片读取后确认）"
+                "已确认药名：\(medicineName)（模拟识别后确认）"
             case .chosenFromFrequentList:
                 "已确认药名：\(medicineName)（从常用药名选择）"
             }
+        case let .medicineAssessmentDidNotSucceed(reason):
+            switch reason {
+            case .capabilityNotAvailableYet:
+                "尚未完成用药风险评估：设备内评估将在下一阶段接入"
+            }
         case let .careActionShown(medicineName):
-            "已显示\(medicineName)的用药提示占位（正式提示卡尚未接入）"
+            "已显示\(medicineName)的用药提示"
         case let .companionFinished(completion):
             switch completion {
             case .arrivedSafely:

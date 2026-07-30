@@ -15,7 +15,10 @@ struct TodayView: View {
     private var plan: TodayPlan { environment.plan }
 
     private var summary: TodayStatusSummary {
-        TodayStatusSummary(state: environment.companion.state)
+        TodayStatusSummary(
+            state: environment.companion.state,
+            capabilities: environment.capabilities
+        )
     }
 
     /// The headline. Once a session has finished, the plan's opening line would

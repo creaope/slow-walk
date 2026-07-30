@@ -35,7 +35,8 @@ struct CompanionSessionModelTests {
             records: store,
             simulator: SpyScanSimulator(),
             plan: .demo,
-            readDelay: ControllableReadDelay()
+            readDelay: ControllableReadDelay(),
+            capabilities: .phase0
         )
 
         session.startCompanion()
@@ -59,7 +60,8 @@ struct CompanionSessionModelTests {
             records: RecordingCareRecordStore(),
             simulator: spy,
             plan: .demo,
-            readDelay: delay
+            readDelay: delay,
+            capabilities: .phase0
         )
 
         session.startCompanion()
@@ -78,7 +80,8 @@ struct CompanionSessionModelTests {
         let delay = ControllableReadDelay()
         let store = RecordingCareRecordStore()
         let session = CompanionSessionModel(
-            records: store, simulator: spy, plan: .demo, readDelay: delay
+            records: store, simulator: spy, plan: .demo, readDelay: delay,
+            capabilities: .phase0
         )
 
         session.startCompanion()
@@ -103,7 +106,8 @@ struct CompanionSessionModelTests {
         let delay = ControllableReadDelay()
         let store = RecordingCareRecordStore()
         let session = CompanionSessionModel(
-            records: store, simulator: spy, plan: .demo, readDelay: delay
+            records: store, simulator: spy, plan: .demo, readDelay: delay,
+            capabilities: .phase0
         )
 
         session.startCompanion()
@@ -140,7 +144,8 @@ struct CompanionSessionModelTests {
         let delay = ControllableReadDelay()
         let store = RecordingCareRecordStore()
         let session = CompanionSessionModel(
-            records: store, simulator: spy, plan: .demo, readDelay: delay
+            records: store, simulator: spy, plan: .demo, readDelay: delay,
+            capabilities: .phase0
         )
 
         session.startCompanion()
@@ -162,7 +167,8 @@ struct CompanionSessionModelTests {
         let delay = ControllableReadDelay()
         let store = RecordingCareRecordStore()
         let session = CompanionSessionModel(
-            records: store, simulator: spy, plan: .demo, readDelay: delay
+            records: store, simulator: spy, plan: .demo, readDelay: delay,
+            capabilities: .phase0
         )
 
         session.startCompanion()
@@ -200,7 +206,8 @@ struct CompanionSessionModelTests {
         let delay = ControllableReadDelay()
         let store = RecordingCareRecordStore()
         let session = CompanionSessionModel(
-            records: store, simulator: spy, plan: .demo, readDelay: delay
+            records: store, simulator: spy, plan: .demo, readDelay: delay,
+            capabilities: .phase0
         )
 
         session.startCompanion()
@@ -217,13 +224,24 @@ struct CompanionSessionModelTests {
             if case .medicineConfirmed = kind { return true }
             return false
         }.count
+
+        #expect(confirmedCount == 1)
+
+        // No care-action record is written at all: confirming a name is not an
+        // assessment, so nothing may claim a care action was shown.
         let actionCount = store.kinds.filter { kind in
             if case .careActionShown = kind { return true }
             return false
         }.count
+        #expect(actionCount == 0)
 
-        #expect(confirmedCount == 1)
-        #expect(actionCount == 1)
+        // The one record that *is* written for the missing assessment is
+        // written once, not once per confirmation attempt.
+        let notAssessedCount = store.kinds.filter { kind in
+            if case .medicineAssessmentDidNotSucceed = kind { return true }
+            return false
+        }.count
+        #expect(notAssessedCount == 1)
     }
 
     // MARK: - retry / retake start a fresh read
@@ -241,7 +259,8 @@ struct CompanionSessionModelTests {
         let delay = ControllableReadDelay()
         let store = RecordingCareRecordStore()
         let session = CompanionSessionModel(
-            records: store, simulator: spy, plan: .demo, readDelay: delay
+            records: store, simulator: spy, plan: .demo, readDelay: delay,
+            capabilities: .phase0
         )
 
         #expect(session.startCompanion())
@@ -291,7 +310,8 @@ struct CompanionSessionModelTests {
         let delay = ControllableReadDelay()
         let store = RecordingCareRecordStore()
         let session = CompanionSessionModel(
-            records: store, simulator: spy, plan: .demo, readDelay: delay
+            records: store, simulator: spy, plan: .demo, readDelay: delay,
+            capabilities: .phase0
         )
 
         #expect(session.startCompanion())
@@ -340,7 +360,8 @@ struct CompanionSessionModelTests {
         let delay = ControllableReadDelay()
         let store = RecordingCareRecordStore()
         let session = CompanionSessionModel(
-            records: store, simulator: spy, plan: .demo, readDelay: delay
+            records: store, simulator: spy, plan: .demo, readDelay: delay,
+            capabilities: .phase0
         )
 
         #expect(session.startCompanion())
@@ -379,7 +400,8 @@ struct CompanionSessionModelTests {
             records: RecordingCareRecordStore(),
             simulator: SpyScanSimulator(),
             plan: .demo,
-            readDelay: ControllableReadDelay()
+            readDelay: ControllableReadDelay(),
+            capabilities: .phase0
         )
     }
 }

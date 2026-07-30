@@ -47,9 +47,25 @@ struct CareSettingsView: View {
             }
 
             Section("紧急联系人") {
-                Text("尚未接入。可以联系谁由您自己决定。")
-                    .font(.body)
+                CapabilityStatusRow(
+                    status: environment.capabilities.status(of: .trustedContacts)
+                )
+                Text("可以联系谁由您自己决定。")
+                    .font(.footnote)
                     .foregroundStyle(.secondary)
+            }
+
+            // The honest capability list, and the entry point for checking it.
+            // Read from `environment.capabilities` — the same value the
+            // companion session runs against — so this section and the in-flow
+            // wording cannot disagree: there is one table, and changing a
+            // capability's real state changes both at once.
+            Section("当前能力状态") {
+                CapabilityStatusList(catalog: environment.capabilities)
+                Text("此列表说明各项能力当前的实现方式，不说明用药是否安全。")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section("关于") {

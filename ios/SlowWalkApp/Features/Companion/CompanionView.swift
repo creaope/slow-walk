@@ -9,7 +9,6 @@ struct CompanionView: View {
     @Environment(AppEnvironment.self) private var environment
 
     private var session: CompanionSessionModel { environment.companion }
-
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
@@ -88,13 +87,8 @@ struct CompanionView: View {
         case let .awaitingMedicineConfirmation(prompt):
             confirmationControls(prompt)
 
-        case let .showingRiskAction(confirmed):
-            VStack(alignment: .leading, spacing: 16) {
-                CareActionPresentationSlot(confirmedMedicine: confirmed)
-                primaryButton(CompanionCopy.acknowledgeCareActionTitle) {
-                    session.acknowledgeCareAction()
-                }
-            }
+        case let .awaitingMedicineAssessment(gate):
+            assessmentGateControls(gate)
 
         case .travelling:
             primaryButton(CompanionCopy.approachStopTitle) {
@@ -115,12 +109,50 @@ struct CompanionView: View {
         HStack(spacing: 10) {
             ProgressView()
                 .accessibilityHidden(true)
-            Text("正在读取，请稍等")
+            // Says "模拟识别", not "正在读取": nothing is being read.
+            Text("正在模拟识别，请稍等")
                 .font(.body)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("正在读取药盒上的文字，请稍等。")
+        .accessibilityLabel("正在按演示脚本模拟识别药名，请稍等。本阶段不读取照片。")
+    }
+
+    /// The ways out of the assessment gate.
+    ///
+    /// There is deliberately no control here that continues the outing. The
+    /// person may choose a different medicine, read again, or end the session —
+    /// and `session.canDepart` is asserted so a departure control cannot be
+    /// added back without the assessment result that would justify it.
+    private func assessmentGateControls(
+        _ gate: MedicineAssessmentGate
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 16) {
+            MedicineAssessmentPendingPanel(
+                gate: gate,
+                // From the session's own table, so the badge in this panel and
+                // the sentence above it describe the same build.
+                assessmentStatus: session.capabilities
+                    .status(of: .medicineRiskAssessment)
+            )
+
+            primaryButton(CompanionCopy.reconsiderMedicineTitle) {
+                session.reconsiderMedicineChoice()
+            }
+
+            secondaryButton(CompanionCopy.retryPhotoTitle) {
+                session.retakeMedicinePhoto()
+            }
+
+            if session.canDepart {
+                // Unreachable today: `canDepart` is false for every value of
+                // `MedicineAssessmentProgress` this build can produce. Kept as
+                // the single place a departure control may ever live, so it
+                // cannot be added anywhere that skips the check.
+                primaryButton(CompanionCopy.continueCompanionTitle) {}
+                    .disabled(true)
+            }
+        }
     }
 
     /// Recovery paths after a read that did not succeed.
@@ -149,9 +181,16 @@ struct CompanionView: View {
                         Text(CompanionCopy.contactSomeoneHint)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
-                        Text("本阶段尚未接入联系功能。")
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
+                        // The "not wired up" line comes from the session's
+                        // capability table rather than being written here, so
+                        // it cannot drift from what the rest of the app says.
+                        if let detail = session.capabilities
+                            .detail(of: .trustedContacts)
+                        {
+                            Text(detail)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                        }
                     }
                 }
             }
@@ -178,7 +217,7 @@ struct CompanionView: View {
                 .accessibilityLabel("选择 \(candidate.displayName)，\(candidate.recognitionHint)")
             }
 
-            Text("如果都对不上，可以重新拍一次。")
+            Text("如果都对不上，可以重新试一次。")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
@@ -190,7 +229,7 @@ struct CompanionView: View {
 
     private var completedControls: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("这次陪伴的记录已经保存。")
+            Text("这次陪伴的记录已经保存在本次运行中。")
                 .font(.body)
             secondaryButton(CompanionCopy.startCompanionTitle) {
                 session.startCompanion()

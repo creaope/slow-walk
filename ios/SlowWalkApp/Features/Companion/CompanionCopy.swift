@@ -11,10 +11,30 @@ import Foundation
 /// - Always say what happened, then what to do first, in that order.
 /// - On a failed read, offer a recovery path. Never offer a medicine
 ///   conclusion, dosage, or safety verdict.
+/// - Never describe a capability this build does not have. A sentence about
+///   reading a photo, following a route, or reminding on arrival is a claim
+///   about the world; it may only be written when the `CapabilityCatalog` in
+///   force says the capability is real. Where wording depends on a capability,
+///   the catalog is passed in by the caller — this type holds none of its own,
+///   so the wording always describes the same build the flow is running.
 ///
 /// DEMO DATA — NOT FOR CLINICAL USE
 enum CompanionCopy {
     static let demoDataNotice = "DEMO DATA — NOT FOR CLINICAL USE"
+
+    // This type deliberately holds no `CapabilityCatalog`.
+    //
+    // It used to own a `static let capabilities: CapabilityCatalog = .phase0`,
+    // which made a second source of truth: `CompanionSessionModel` took an
+    // injected catalog while every screen read this fixed one. Injecting a
+    // different catalog then changed the session's behaviour and left all the
+    // wording describing the shipping build — the exact contradiction the
+    // single-source requirement exists to prevent, and invisible in tests
+    // because both paths agreed by default.
+    //
+    // Functions whose wording depends on a capability now receive the catalog
+    // (or the one availability they need) from their caller. The default lives
+    // once, in `AppEnvironment`.
 
     /// Short label for the current step, used in summaries and VoiceOver.
     static func stepLabel(for state: CompanionFlowState) -> String {
@@ -24,11 +44,11 @@ enum CompanionCopy {
         case .preDepartureCheck:
             "出门前确认"
         case let .scanningMedicine(attempt):
-            attempt.isAwaitingRecovery ? "需要再试一次" : "正在读取药盒"
+            attempt.isAwaitingRecovery ? "需要再试一次" : "正在模拟识别"
         case .awaitingMedicineConfirmation:
             "请确认药名"
-        case .showingRiskAction:
-            "用药提示"
+        case .awaitingMedicineAssessment:
+            "尚未完成风险评估"
         case .travelling:
             "出行途中"
         case .approachingStop:
@@ -42,7 +62,15 @@ enum CompanionCopy {
     }
 
     /// What happened. States the situation without evaluating the person.
-    static func situation(for state: CompanionFlowState) -> String {
+    ///
+    /// Takes the capability table because one of its branches — the assessment
+    /// gate — describes what the app can do. The caller supplies the same table
+    /// the session is running against, so the sentence a person reads cannot
+    /// describe a different build from the one deciding their flow.
+    static func situation(
+        for state: CompanionFlowState,
+        capabilities: CapabilityCatalog
+    ) -> String {
         switch state {
         case .notStarted:
             "今天的陪伴还没有开始。"
@@ -52,35 +80,32 @@ enum CompanionCopy {
             if let setback = attempt.setback {
                 setbackSituation(setback)
             } else if attempt.attemptNumber == 1 {
-                "正在读取药盒上的文字。"
+                // Says "模拟识别", not "正在读取照片": no photo is read.
+                // `.medicineRecognition` is `.simulated`, and this sentence
+                // must not outrun it.
+                "正在按演示脚本模拟识别药名，本阶段不读取照片。"
             } else {
-                "正在重新读取药盒上的文字。"
+                "正在重新模拟识别药名，本阶段不读取照片。"
             }
         case let .awaitingMedicineConfirmation(prompt):
             switch prompt.origin {
             case .readFromPhoto:
-                "照片里读到了几个相近的药名，还不能确定是哪一个。"
+                "演示脚本给出了几个相近的药名，还不能确定是哪一个。"
             case .chosenFromFrequentList:
                 "已经打开常用药名列表。"
             }
-        case let .showingRiskAction(confirmed):
-            // Only a photo-based read can speak about "this box". A medicine
-            // picked from a list was never read, so the wording must not
-            // claim the box was identified.
-            switch confirmed.origin {
-            case .readFromPhoto:
-                "已确认这盒是\(confirmed.candidate.displayName)。"
-            case .chosenFromFrequentList:
-                "已按您选择的\(confirmed.candidate.displayName)继续。"
-            }
+        case let .awaitingMedicineAssessment(gate):
+            assessmentGateSituation(gate, capabilities: capabilities)
         case .travelling:
-            "出行已经开始，路线正在记录。"
+            // Says nothing about recording a route: `.coreLocation` is
+            // unavailable, so no route exists to record.
+            "出行步骤已经开始。本阶段使用演示位置，不记录真实路线。"
         case .approachingStop:
-            "快到目的地了。"
+            "这是演示中的“即将到站”步骤，由手动操作触发。"
         case let .completed(completion):
             switch completion {
             case .arrivedSafely:
-                "今天的行程已经安全结束。"
+                "今天的行程已经结束。"
             case .endedEarly:
                 "这次陪伴已经结束，随时可以重新开始。"
             }
@@ -96,9 +121,9 @@ enum CompanionCopy {
             "先确认要带的药，再出门。"
         case let .scanningMedicine(attempt):
             if attempt.setback != nil {
-                "可以重新拍一次，也可以直接从常用药名里选。"
+                "可以重新试一次，也可以直接从常用药名里选。"
             } else {
-                "请把药盒正面朝上，稍等一下。"
+                "请稍等一下。"
             }
         case let .awaitingMedicineConfirmation(prompt):
             switch prompt.origin {
@@ -107,14 +132,17 @@ enum CompanionCopy {
             case .chosenFromFrequentList:
                 "请选出这次要用的药。"
             }
-        case .showingRiskAction:
-            "先看完下面的用药提示，再继续出发。"
+        case .awaitingMedicineAssessment:
+            // Never "先看完提示再继续出发": there is no prompt to read and no
+            // departure to make.
+            "可以重新选择药名，或者先结束这次陪伴。"
         case .travelling:
-            "按原计划走，到站前会提前提醒。"
+            // Never "到站前会提前提醒": `.arrivalReminder` is unavailable.
+            "本阶段不会自动提醒到站，需要手动进入下一步。"
         case .approachingStop:
             "可以先收好东西，准备下车。"
         case .completed:
-            "记录已经保存，可以在守护记录里查看。"
+            "记录已经保存在本次运行中，可以在守护记录里查看。"
         }
     }
 
@@ -129,8 +157,8 @@ enum CompanionCopy {
                 : nil
         case .awaitingMedicineConfirmation:
             "不同的药提示不一样，确认之后才准确。"
-        case .showingRiskAction:
-            "这里只做用药提示，不替代医生的诊断。"
+        case .awaitingMedicineAssessment:
+            "确认药名只说明这是哪一盒药，还不能说明能不能吃。"
         case .approachingStop:
             "提前一点准备，下车时不用着急。"
         case .notStarted, .travelling, .completed:
@@ -138,18 +166,47 @@ enum CompanionCopy {
         }
     }
 
+    /// What the assessment gate says, derived from the capability table.
+    ///
+    /// This is the one screen that must never overstate: a person held here has
+    /// confirmed a medicine and may reasonably expect to be told something
+    /// about it. The wording therefore states twice over that nothing was
+    /// assessed — once as the situation, once as the reason.
+    ///
+    /// The explanatory line comes from the passed-in catalog. When
+    /// `.medicineRiskAssessment` becomes `.deviceLocal`, that catalog's detail
+    /// changes and this sentence follows, rather than keeping a "尚未接入"
+    /// explanation written into the wording itself.
+    private static func assessmentGateSituation(
+        _ gate: MedicineAssessmentGate,
+        capabilities: CapabilityCatalog
+    ) -> String {
+        let name = gate.confirmed.candidate.displayName
+        switch gate.progress {
+        case .notStarted:
+            return "已确认药名：\(name)。正在等待正式的用药风险评估。"
+        case let .couldNotAssess(setback):
+            switch setback {
+            case .notWiredUpYet:
+                let detail = capabilities.detail(of: .medicineRiskAssessment)
+                    ?? "设备内评估将在下一阶段接入。"
+                return "已确认药名：\(name)，但本阶段尚未完成风险评估。\(detail)"
+            }
+        }
+    }
+
     private static func setbackSituation(_ setback: MedicineReadSetback) -> String {
         switch setback {
         case .textNotLegible:
-            "这张照片上的字没有看清，可能是光线或角度的关系。"
+            "演示脚本这次没有给出可用的药名文字。"
         case .noMedicineNameFound:
-            "这张照片里没有找到药名，可能拍到的是侧面。"
+            "演示脚本这次没有给出药名。"
         }
     }
 
     // MARK: - Recovery and actions
 
-    static let retryPhotoTitle = "重新拍一次"
+    static let retryPhotoTitle = "重新试一次"
     static let chooseFromListTitle = "从常用药名里选"
     static let readAloudAgainTitle = "再说一遍"
     static let whyThisHappenedTitle = "看看原因"
@@ -159,7 +216,7 @@ enum CompanionCopy {
     static let startCompanionTitle = "开始陪伴"
     static let continueCompanionTitle = "继续陪伴"
     static let beginMedicineReadTitle = "确认要带的药"
-    static let acknowledgeCareActionTitle = "知道了，继续出发"
+    static let reconsiderMedicineTitle = "重新选择药名"
     static let approachStopTitle = "模拟：即将到站"
     static let arriveSafelyTitle = "已安全到达"
     static let endEarlyTitle = "先结束这次陪伴"
