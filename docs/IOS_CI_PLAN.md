@@ -1,29 +1,42 @@
-# iOS CI 预留计划
+# iOS CI 计划与现状
 
-当前阶段不创建 `.github/workflows/ios-build.yml`，也不在 Windows 上伪造
-`.xcodeproj` 或 `.xcworkspace`。Ubuntu 上的 SwiftPM 工作流只验证
-`swift-packages/SlowWalkCore` 和 `server`，不能证明 SwiftUI 或任何 iOS
-专属功能可以构建。
+Ubuntu 上的 SwiftPM 工作流只验证 `swift-packages/SlowWalkCore` 和 `server`，
+不能证明 SwiftUI 或任何 iOS 专属功能可以构建。因此 iOS 需要独立的 macOS
+工作流。
 
-## 启用条件
+## 启用条件（已全部满足）
 
-只有满足以下条件后才建立 iOS 工作流：
+1. 在 Mac 上使用 Xcode 创建并提交真实的 `.xcodeproj`。已提交
+   `ios/SlowWalkApp.xcodeproj`。
+2. 提交一个可供 CI 使用的 shared scheme。已提交
+   `xcshareddata/xcschemes/SlowWalkApp.xcscheme`，其中 `SlowWalkAppTests`
+   已登记为 testable。
+3. 用 Xcode 确认项目引用 `SlowWalkCore` 的方式和最低 iOS 版本。工程以
+   local package 方式引用 `SlowWalkCore`，`IPHONEOS_DEPLOYMENT_TARGET = 17.0`。
+4. 确认模拟器构建不需要证书、描述文件或仓库中的私密配置。以
+   `CODE_SIGNING_ALLOWED=NO` 与 `CODE_SIGNING_REQUIRED=NO` 验证通过。
 
-1. 在 Mac 上使用 Xcode 创建并提交真实的 `.xcodeproj` 或 `.xcworkspace`。
-2. 提交一个可供 CI 使用的 shared scheme。
-3. 用 Xcode 确认项目引用 `SlowWalkCore` 的方式和最低 iOS 版本。
-4. 确认模拟器构建不需要证书、描述文件或仓库中的私密配置。
+## 当前实现
 
-## 预定验证方式
-
-未来的 `.github/workflows/ios-build.yml` 应当：
+`.github/workflows/ios-app.yml`：
 
 - 使用 `runs-on: macos-latest`。
-- 使用 `xcodebuild` 和真实工程、workspace、scheme 名称。
-- 选择 iOS Simulator 目标。
+- 使用 `xcodebuild` 和真实工程名与 scheme 名。
+- 通过 `.github/scripts/select-ios-simulator.py` 在运行时选取实际存在的
+  iPhone Simulator，而不是硬编码某个机型或 iOS 版本；runner 上的模拟器
+  组合不由本仓库固定。
+- 找不到可用 iPhone Simulator 时直接失败，不退化为“仅构建”。
 - 设置 `CODE_SIGNING_ALLOWED=NO` 和 `CODE_SIGNING_REQUIRED=NO`。
-- 在任何解析、编译或测试失败时让工作流真实失败。
-- 明确区分模拟器构建结果与真机、签名、权限和发布验证。
+- 任何解析、编译或测试失败都会让工作流真实失败。
 
-在真实 Xcode 工程和 shared scheme 存在前，上述命令参数保持未填写状态，
-不创建占位工作流。
+## 边界
+
+该工作流只证明模拟器上的构建与单元测试结果。它不覆盖真机、签名、权限、
+推送、后台模式和发布验证。`generic/platform=iOS Simulator` 只能用于构建
+验证，不得用于声称测试已真实执行。
+
+## 尚未验证
+
+本工作流尚未在 GitHub runner 上实际运行过；首次运行结果需在 PR 上确认。
+runner 镜像自带的 Xcode 与 iOS Simulator 版本组合未经本地核实，这正是
+destination 采用运行时探测而非硬编码的原因。
