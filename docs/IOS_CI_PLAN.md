@@ -20,14 +20,29 @@ Ubuntu 上的 SwiftPM 工作流只验证 `swift-packages/SlowWalkCore` 和 `serv
 
 `.github/workflows/ios-app.yml`：
 
-- 使用 `runs-on: macos-latest`。
+- 使用 `runs-on: macos-26`，而不是 `macos-latest`。`macos-latest` 在 2026 年
+  7 月才迁移到 macos-26；它此前指向的 macos-15 镜像默认 Xcode 为 16.4，
+  无法构建本工程。固定标签避免默认 Xcode 再次漂移导致构建失败。
 - 使用 `xcodebuild` 和真实工程名与 scheme 名。
 - 通过 `.github/scripts/select-ios-simulator.py` 在运行时选取实际存在的
-  iPhone Simulator，而不是硬编码某个机型或 iOS 版本；runner 上的模拟器
-  组合不由本仓库固定。
+  iPhone Simulator，而不是硬编码某个机型或 iOS 版本；镜像上的模拟器组合
+  不由本仓库固定，且会随镜像更新变化。
 - 找不到可用 iPhone Simulator 时直接失败，不退化为“仅构建”。
 - 设置 `CODE_SIGNING_ALLOWED=NO` 和 `CODE_SIGNING_REQUIRED=NO`。
 - 任何解析、编译或测试失败都会让工作流真实失败。
+
+## Runner 事实（已由 actions/runner-images 官方镜像清单确认）
+
+`macos-26-arm64` 镜像：
+
+- 默认 Xcode 26.5（另装 26.0.1 / 26.1.1 / 26.2 / 26.3 / 26.4.1 / 26.6）。
+- iOS Simulator runtime 26.0、26.1、26.2、26.4、26.5。
+- iOS 26.5 runtime 提供 iPhone 17、iPhone 17 Pro、iPhone 17 Pro Max、
+  iPhone 17e、iPhone Air。
+
+本地通过测试所用的 Xcode 为 26.6，比 runner 默认的 26.5 高一个次版本。
+工程 `IPHONEOS_DEPLOYMENT_TARGET = 17.0`、`SWIFT_VERSION = 6.0`，两者均在
+Xcode 26.x 支持范围内。
 
 ## 边界
 
@@ -38,5 +53,4 @@ Ubuntu 上的 SwiftPM 工作流只验证 `swift-packages/SlowWalkCore` 和 `serv
 ## 尚未验证
 
 本工作流尚未在 GitHub runner 上实际运行过；首次运行结果需在 PR 上确认。
-runner 镜像自带的 Xcode 与 iOS Simulator 版本组合未经本地核实，这正是
-destination 采用运行时探测而非硬编码的原因。
+本地未使用 runner 默认的 Xcode 26.5 复现测试，只在 Xcode 26.6 上验证过。

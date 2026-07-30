@@ -22,7 +22,12 @@ concurrency:
 jobs:
   test:
     name: macOS Xcode Simulator
-    runs-on: macos-latest
+    # Pinned rather than `macos-latest`: the `macos-latest` label was migrated
+    # to macos-26 only in July 2026, and the macos-15 image it previously
+    # pointed at defaults to Xcode 16.4, which cannot build this project.
+    # Verified on the macos-26-arm64 image: Xcode 26.5 default, iOS 26.5
+    # simulator runtime, iPhone 17 family available.
+    runs-on: macos-26
     timeout-minutes: 45
 
     steps:
