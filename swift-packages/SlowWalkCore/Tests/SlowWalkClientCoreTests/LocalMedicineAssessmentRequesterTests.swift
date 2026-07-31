@@ -910,6 +910,56 @@ final class LocalMedicineAssessmentRequesterTests: XCTestCase {
         )
     }
 
+    func testSecondConcurrentConfirmationConsumesPendingContextAndCancelsFirst()
+        async throws
+    {
+        let barrier = ConfirmationSuspensionBarrier()
+        let requester = LocalMedicineAssessmentRequester(
+            pipeline: MedicinePipeline(
+                dateProvider: FixedClientClock(date: clientTestDate)
+            ),
+            confirmationBarrier: barrier
+        )
+        let request = makeRequest(
+            texts: ["Cold Relief"],
+            requestID: clientTestUUID(110)
+        )
+        let ambiguous = try await requester.assess(request: request)
+        XCTAssertEqual(ambiguous.resolution.status, .ambiguous)
+        let candidate = try XCTUnwrap(ambiguous.resolution.candidates.first)
+        let command = MedicineCandidateConfirmationCommand(
+            originalRequestID: request.requestID,
+            candidateID: candidate.medicine.id
+        )
+
+        let firstConfirmation = Task {
+            try await requester.confirmMedicine(command: command)
+        }
+        await barrier.waitUntilConfirmationIsSuspended()
+
+        // No further assessment starts, so the generation counter cannot tell
+        // the two confirmations apart and only the consumed pending context
+        // can. The barrier holds the first confirmation alone, so the second
+        // reaches the pipeline while the first is still in flight.
+        let confirmed = try await requester.confirmMedicine(command: command)
+        XCTAssertEqual(confirmed.resolution.status, .resolved)
+        XCTAssertEqual(
+            confirmed.resolution.selectedMedicine?.id,
+            candidate.medicine.id
+        )
+
+        await barrier.releaseConfirmation()
+
+        do {
+            _ = try await firstConfirmation.value
+            XCTFail("Expected the superseded confirmation to be cancelled.")
+        } catch is CancellationError {
+            // Expected: the context was already consumed by the second call.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+    }
+
     private func makeRequest(
         texts: [String],
         requestID: UUID,
