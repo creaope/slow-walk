@@ -27,6 +27,10 @@ public struct MedicineAssessmentResponseValidator: Sendable {
             throw MedicineAssessmentResponseValidationError
                 .generatedAtMismatch
         }
+        try validateRecognitionEvidence(
+            response.resolution.evidence,
+            for: request.input
+        )
 
         let candidateIDs = response.resolution.candidates.map {
             $0.medicine.id
@@ -79,6 +83,49 @@ public struct MedicineAssessmentResponseValidator: Sendable {
                 .confirmationMismatch
         }
     }
+
+    /// Binds the returned evidence to the recognition input that was sent.
+    ///
+    /// A matching request identifier alone cannot prove that a response
+    /// describes the current scan, so the recognition evidence is compared
+    /// field by field before the response may become presentation state.
+    private func validateRecognitionEvidence(
+        _ evidence: MedicineResolutionEvidence,
+        for input: MedicineRecognitionInput
+    ) throws {
+        guard evidence.recognizedTexts == input.recognizedTexts,
+            evidence.languageCode == input.languageCode,
+            Self.isSameConfidence(
+                evidence.rawConfidence,
+                input.rawConfidence
+            )
+        else {
+            throw MedicineAssessmentResponseValidationError
+                .recognitionEvidenceMismatch
+        }
+    }
+
+    /// Conservative confidence comparison.
+    ///
+    /// Only two finite values within `confidenceTolerance` match. A single
+    /// missing value or any non-finite value is treated as a mismatch so that
+    /// `NaN` or an infinity can never be read as equal evidence.
+    private static func isSameConfidence(
+        _ lhs: Double?,
+        _ rhs: Double?
+    ) -> Bool {
+        switch (lhs, rhs) {
+        case (nil, nil):
+            true
+        case (let lhs?, let rhs?):
+            lhs.isFinite && rhs.isFinite
+                && abs(lhs - rhs) <= confidenceTolerance
+        default:
+            false
+        }
+    }
+
+    private static let confidenceTolerance = 1e-12
 }
 
 public enum MedicineAssessmentResponseValidationError:
@@ -90,6 +137,7 @@ public enum MedicineAssessmentResponseValidationError:
     case apiVersionMismatch
     case missingSourceDataVersion
     case generatedAtMismatch
+    case recognitionEvidenceMismatch
     case duplicateCandidateID
     case invalidResolution
     case assessmentMismatch

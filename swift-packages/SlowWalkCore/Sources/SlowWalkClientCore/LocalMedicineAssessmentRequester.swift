@@ -17,11 +17,26 @@ public actor LocalMedicineAssessmentRequester:
     }
 
     private let pipeline: MedicinePipeline
+    private let confirmationBarrier: (any LocalConfirmationBarrier)?
     private var pendingConfirmation: PendingConfirmation?
     private var assessmentGeneration: UInt64 = 0
 
     public init(pipeline: MedicinePipeline) {
         self.pipeline = pipeline
+        confirmationBarrier = nil
+    }
+
+    /// Test-only composition that can suspend a confirmation mid-flight.
+    ///
+    /// `assessConfirmedCandidate` has no injectable suspension point, so the
+    /// stale-confirmation guard would otherwise only be observable by guessing
+    /// the scheduler. The barrier is internal and unavailable to clients.
+    init(
+        pipeline: MedicinePipeline,
+        confirmationBarrier: any LocalConfirmationBarrier
+    ) {
+        self.pipeline = pipeline
+        self.confirmationBarrier = confirmationBarrier
     }
 
     /// Explicit demo composition using the bundled non-clinical catalog.
@@ -105,6 +120,7 @@ public actor LocalMedicineAssessmentRequester:
             let records = try request.recentRecords.map {
                 try $0.domainModel()
             }
+            await confirmationBarrier?.waitBeforeConfirmation()
             result = try await pipeline.assessConfirmedCandidate(
                 candidateID: command.candidateID,
                 context: pendingConfirmation.context,
@@ -121,11 +137,15 @@ public actor LocalMedicineAssessmentRequester:
             )
         }
 
-        if operationGeneration == assessmentGeneration,
+        // A newer assessment started while this confirmation was suspended,
+        // so its result describes evidence the caller has already replaced and
+        // must never become a consumable response.
+        guard operationGeneration == assessmentGeneration,
             self.pendingConfirmation?.request.requestID == request.requestID
-        {
-            self.pendingConfirmation = nil
+        else {
+            throw CancellationError()
         }
+        self.pendingConfirmation = nil
         return makeResponse(from: result, request: request)
     }
 
@@ -260,4 +280,9 @@ public enum LocalMedicineConfirmationError:
 {
     case noPendingAssessment
     case candidateNotOffered
+}
+
+/// Internal seam that lets a test hold a confirmation at a known point.
+protocol LocalConfirmationBarrier: Sendable {
+    func waitBeforeConfirmation() async
 }

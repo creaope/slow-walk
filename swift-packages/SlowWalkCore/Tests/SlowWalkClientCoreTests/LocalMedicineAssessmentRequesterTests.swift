@@ -1,11 +1,12 @@
 import Foundation
 import SlowWalkAPIContracts
-import SlowWalkClientCore
 import SlowWalkDataInterfaces
 import SlowWalkDomain
 import SlowWalkMedicineKnowledge
 import SlowWalkMedicinePipeline
 import XCTest
+
+@testable import SlowWalkClientCore
 
 final class LocalMedicineAssessmentRequesterTests: XCTestCase {
     func testNormalAssessmentReturnsGreenWithValidHealthContext()
@@ -724,24 +725,258 @@ final class LocalMedicineAssessmentRequesterTests: XCTestCase {
         }
     }
 
+    func testResponseValidatorRejectsRecognizedTextsMismatch() {
+        let requestID = clientTestUUID(100)
+        let request = makeRequest(
+            texts: ["Demo Medicine", "Second Line"],
+            requestID: requestID
+        )
+
+        // Different text, dropped text, and reordered text must all fail: the
+        // comparison is item by item and order sensitive.
+        for texts in [
+            ["Stale Medicine"],
+            [],
+            ["Demo Medicine"],
+            ["Second Line", "Demo Medicine"],
+        ] {
+            assertValidationError(
+                .recognitionEvidenceMismatch,
+                response: makeResponseWithEvidence(
+                    requestID: requestID,
+                    recognizedTexts: texts
+                ),
+                request: request
+            )
+        }
+    }
+
+    func testResponseValidatorRejectsLanguageCodeMismatch() {
+        let requestID = clientTestUUID(101)
+        let request = makeRequest(
+            texts: ["Demo Medicine"],
+            requestID: requestID
+        )
+
+        for languageCode: String? in ["zh", nil] {
+            assertValidationError(
+                .recognitionEvidenceMismatch,
+                response: makeResponseWithEvidence(
+                    requestID: requestID,
+                    languageCode: languageCode
+                ),
+                request: request
+            )
+        }
+    }
+
+    func testResponseValidatorRejectsRawConfidenceMismatch() {
+        let requestID = clientTestUUID(102)
+        let request = makeRequest(
+            texts: ["Demo Medicine"],
+            requestID: requestID
+        )
+
+        for confidence: Double? in [0.5, nil, 0.95 + 1e-6] {
+            assertValidationError(
+                .recognitionEvidenceMismatch,
+                response: makeResponseWithEvidence(
+                    requestID: requestID,
+                    rawConfidence: confidence
+                ),
+                request: request
+            )
+        }
+    }
+
+    func testResponseValidatorRejectsNonFiniteRawConfidence() {
+        let requestID = clientTestUUID(103)
+
+        // The inner loop also pairs a non-finite value with itself: an
+        // infinity that survived a naive equality check would otherwise be
+        // read as matching evidence.
+        for confidence in [Double.nan, .infinity, -.infinity, .signalingNaN] {
+            for requestConfidence: Double? in [0.95, confidence] {
+                assertValidationError(
+                    .recognitionEvidenceMismatch,
+                    response: makeResponseWithEvidence(
+                        requestID: requestID,
+                        rawConfidence: confidence
+                    ),
+                    request: makeRequest(
+                        texts: ["Demo Medicine"],
+                        requestID: requestID,
+                        rawConfidence: requestConfidence
+                    )
+                )
+            }
+        }
+    }
+
+    func testResponseValidatorAcceptsMatchingRecognitionEvidence() {
+        let requestID = clientTestUUID(104)
+        let validator = MedicineAssessmentResponseValidator()
+        // Exact evidence, drift inside the tolerance, and a matching absent
+        // confidence must all pass: the guard must not require bitwise
+        // identical doubles, and absent evidence is not by itself suspicious.
+        let accepted: [(String?, Double?, Double?)] = [
+            ("en", 0.95, 0.95),
+            ("en", 0.95 + 1e-13, 0.95),
+            (nil, nil, nil),
+        ]
+
+        for (languageCode, evidenceConfidence, requestConfidence) in accepted {
+            XCTAssertNoThrow(
+                try validator.validate(
+                    makeResponseWithEvidence(
+                        requestID: requestID,
+                        languageCode: languageCode,
+                        rawConfidence: evidenceConfidence
+                    ),
+                    for: makeRequest(
+                        texts: ["Demo Medicine"],
+                        requestID: requestID,
+                        languageCode: languageCode,
+                        rawConfidence: requestConfidence
+                    )
+                )
+            )
+        }
+    }
+
+    func testInFlightConfirmationIsCancelledWhenNewAssessmentStarts()
+        async throws
+    {
+        let barrier = ConfirmationSuspensionBarrier()
+        let requester = LocalMedicineAssessmentRequester(
+            pipeline: MedicinePipeline(
+                dateProvider: FixedClientClock(date: clientTestDate)
+            ),
+            confirmationBarrier: barrier
+        )
+        let oldRequest = makeRequest(
+            texts: ["Cold Relief"],
+            requestID: clientTestUUID(108)
+        )
+        let ambiguous = try await requester.assess(request: oldRequest)
+        XCTAssertEqual(ambiguous.resolution.status, .ambiguous)
+        let oldCandidate = try XCTUnwrap(
+            ambiguous.resolution.candidates.first
+        )
+
+        let confirmationTask = Task {
+            try await requester.confirmMedicine(
+                command: MedicineCandidateConfirmationCommand(
+                    originalRequestID: oldRequest.requestID,
+                    candidateID: oldCandidate.medicine.id
+                )
+            )
+        }
+        await barrier.waitUntilConfirmationIsSuspended()
+
+        // The new scan reuses the identifier so that only the generation
+        // counter can distinguish it: matching identifiers must not be enough.
+        let newRequest = makeRequest(
+            texts: ["Cold Relief"],
+            requestID: oldRequest.requestID
+        )
+        let newResponse = try await requester.assess(request: newRequest)
+        await barrier.releaseConfirmation()
+
+        do {
+            _ = try await confirmationTask.value
+            XCTFail("Expected the stale confirmation to be cancelled.")
+        } catch is CancellationError {
+            // Expected: a superseded confirmation must not return a response.
+        } catch {
+            XCTFail("Unexpected error: \(error)")
+        }
+
+        XCTAssertEqual(newResponse.resolution.status, .ambiguous)
+        let newCandidate = try XCTUnwrap(
+            newResponse.resolution.candidates.first
+        )
+        let confirmed = try await requester.confirmMedicine(
+            command: MedicineCandidateConfirmationCommand(
+                originalRequestID: newRequest.requestID,
+                candidateID: newCandidate.medicine.id
+            )
+        )
+        XCTAssertEqual(confirmed.requestID, newRequest.requestID)
+        XCTAssertEqual(confirmed.resolution.status, .resolved)
+        XCTAssertEqual(
+            confirmed.resolution.selectedMedicine?.id,
+            newCandidate.medicine.id
+        )
+    }
+
     private func makeRequest(
         texts: [String],
         requestID: UUID,
         userProfile: UserHealthProfileDTO = makeClientProfile(),
         recentRecords: [MedicationRecordDTO] = [],
-        apiVersion: String = SlowWalkAPI.version
+        apiVersion: String = SlowWalkAPI.version,
+        languageCode: String? = "en",
+        rawConfidence: Double? = 0.95
     ) -> MedicineAssessmentRequestDTO {
         MedicineAssessmentRequestDTO(
             input: MedicineRecognitionInput(
                 recognizedTexts: texts,
                 capturedAt: clientTestDate,
-                languageCode: "en",
-                rawConfidence: 0.99
+                languageCode: languageCode,
+                rawConfidence: rawConfidence
             ),
             userProfile: userProfile,
             recentRecords: recentRecords,
             requestID: requestID,
             apiVersion: apiVersion
+        )
+    }
+
+    /// Rebuilds the canonical fixture with altered recognition evidence.
+    ///
+    /// Only the evidence changes, so a rejection can only come from the
+    /// evidence binding rather than from an unrelated structural check.
+    private func makeResponseWithEvidence(
+        requestID: UUID,
+        recognizedTexts: [String] = ["Demo Medicine"],
+        languageCode: String? = "en",
+        rawConfidence: Double? = 0.95
+    ) -> MedicineAssessmentResponseDTO {
+        let base = makeMedicineResponse(requestID: requestID)
+        let evidence = base.resolution.evidence
+        let resolution = MedicineResolution(
+            status: base.resolution.status,
+            candidates: base.resolution.candidates,
+            selectedMedicine: base.resolution.selectedMedicine,
+            evidence: MedicineResolutionEvidence(
+                recognizedTexts: recognizedTexts,
+                normalizedText: evidence.normalizedText,
+                normalizedQuery: evidence.normalizedQuery,
+                languageCode: languageCode,
+                rawConfidence: rawConfidence,
+                dosageForms: evidence.dosageForms,
+                removedSpecifications: evidence.removedSpecifications,
+                discardedNoise: evidence.discardedNoise,
+                matcherVersion: evidence.matcherVersion,
+                sourceDataVersions: evidence.sourceDataVersions
+            ),
+            requiresUserConfirmation:
+                base.resolution.requiresUserConfirmation
+        )
+        return MedicineAssessmentResponseDTO(
+            requestID: base.requestID,
+            resolution: resolution,
+            assessment: base.assessment,
+            actionCard: base.actionCard,
+            cacheHit: base.cacheHit,
+            resolutionCacheStatus: base.resolutionCacheStatus,
+            knowledgeCacheStatus: base.knowledgeCacheStatus,
+            sourceDataVersion: base.sourceDataVersion,
+            generatedAt: base.generatedAt,
+            apiVersion: base.apiVersion,
+            healthContextValidation: base.healthContextValidation,
+            medicineKnowledge: base.medicineKnowledge
         )
     }
 
@@ -866,6 +1101,41 @@ actor ClientKnowledgeSearcherStub: MedicineKnowledgeSearching {
             )
         }
         return try results.removeFirst().get()
+    }
+}
+
+/// Holds the first confirmation at a known point until the test releases it.
+///
+/// This makes the stale-confirmation guard observable without guessing the
+/// scheduler: the test only proceeds once the confirmation is truly suspended.
+private actor ConfirmationSuspensionBarrier: LocalConfirmationBarrier {
+    private var confirmationCount = 0
+    private var confirmationContinuation: CheckedContinuation<Void, Never>?
+    private var suspensionWaiters = [CheckedContinuation<Void, Never>]()
+
+    func waitBeforeConfirmation() async {
+        confirmationCount += 1
+        guard confirmationCount == 1 else { return }
+        let waiters = suspensionWaiters
+        suspensionWaiters.removeAll()
+        for waiter in waiters {
+            waiter.resume()
+        }
+        await withCheckedContinuation { continuation in
+            confirmationContinuation = continuation
+        }
+    }
+
+    func waitUntilConfirmationIsSuspended() async {
+        guard confirmationCount == 0 else { return }
+        await withCheckedContinuation { continuation in
+            suspensionWaiters.append(continuation)
+        }
+    }
+
+    func releaseConfirmation() {
+        confirmationContinuation?.resume()
+        confirmationContinuation = nil
     }
 }
 
