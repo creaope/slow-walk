@@ -80,6 +80,53 @@ final class VisionRequestModelsTests:
 
     // MARK: - Request construction
 
+    private func makeRequest() throws -> VisionTransportRequest {
+
+        try VisionTransportRequest.chatCompletion(
+            configuration: makeConfiguration(),
+            image: makeImage(),
+            credential: VisionCredential(apiKey: secret)
+        )
+    }
+
+    func testRequestDescriptionsAndDumpDoNotLeakSecret() throws {
+        let request = try makeRequest()
+        var dumped = String()
+        dump(request, to: &dumped)
+        for rendering in [
+            request.description,
+            request.debugDescription,
+            String(describing: request),
+            String(reflecting: request),
+            "\(request)",
+            dumped,
+        ] {
+            XCTAssertFalse(rendering.contains(secret)
+                || rendering.lowercased().contains("bearer"), rendering)
+        }
+    }
+
+    func testRequestMirrorRedactsAuthorizationButRetainsRealValue() throws {
+        let request = try makeRequest()
+        let children = Mirror(reflecting: request).children
+        for child in children {
+            XCTAssertFalse(String(describing: child.value).contains(secret))
+        }
+        let headers = children.first { $0.label == "headers" }?.value
+            as? [String: String]
+        XCTAssertEqual(
+            headers?[VisionTransportRequest.authorizationHeaderName],
+            VisionTransportRequest.redactionMarker
+        )
+        XCTAssertEqual(headers?["Content-Type"], "application/json")
+        XCTAssertEqual(
+            request.headers[
+                VisionTransportRequest.authorizationHeaderName
+            ],
+            "Bearer \(secret)"
+        )
+    }
+
     func testAuthorizationHeaderIsSetAtCallerBoundary() throws {
         let request = try VisionTransportRequest.chatCompletion(
             configuration: makeConfiguration(),
@@ -145,16 +192,53 @@ final class VisionRequestModelsTests:
         )
     }
 
-    func testEmptyImageDataStillProducesWellFormedDataURI() {
-        let image = VisionImagePayload(
-            data: Data(),
-            mimeType: "image/png"
-        )
+    // MARK: - Request-level image boundaries
 
-        XCTAssertEqual(
-            image.dataURIString,
-            "data:image/png;base64,"
+    func testChatCompletionAcceptsValidImages() throws {
+        _ = try VisionTransportRequest.chatCompletion(
+            configuration: makeConfiguration(maxImageBytes: 4_096),
+            image: VisionImagePayload(
+                data: Data([0x89, 0x50, 0x4E, 0x47]),
+                mimeType: "Image/PNG"
+            ),
+            credential: VisionCredential(apiKey: secret)
         )
+        _ = try VisionTransportRequest.chatCompletion(
+            configuration: makeConfiguration(maxImageBytes: 4_096),
+            image: VisionImagePayload(
+                data: Data(repeating: 0xFF, count: 4_096),
+                mimeType: "image/jpeg"
+            ),
+            credential: VisionCredential(apiKey: secret)
+        )
+    }
+
+    func testChatCompletionRejectsInvalidImagesWithoutLeaking() {
+        let cases: [(VisionImagePayload, VisionRequestError)] = [
+            (VisionImagePayload(
+                data: Data([0x00, 0x01]), mimeType: "image/gif"),
+             .unsupportedMimeType(mimeType: "image/gif")),
+            (VisionImagePayload(
+                data: Data(repeating: 0xAB, count: 4_097),
+                mimeType: "image/jpeg"),
+             .imageTooLarge(byteCount: 4_097, maxImageBytes: 4_096)),
+            (VisionImagePayload(
+                data: Data(), mimeType: "image/png"),
+             .emptyImageData),
+        ]
+        for (image, expected) in cases {
+            XCTAssertThrowsError(
+                try VisionTransportRequest.chatCompletion(
+                    configuration: makeConfiguration(maxImageBytes: 4_096),
+                    image: image,
+                    credential: VisionCredential(apiKey: secret)
+                )
+            ) { error in
+                XCTAssertEqual(error as? VisionRequestError, expected, "\(error)")
+                let rendering = "\(error)"
+                XCTAssertFalse(rendering.contains(secret) || rendering.contains("0xAB"))
+            }
+        }
     }
 
     func testRequestBodyCarriesModelAndInlineImage() throws {

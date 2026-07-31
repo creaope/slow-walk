@@ -156,15 +156,30 @@ struct VisionChatCompletionRequestBody: Encodable, Sendable {
 
 // MARK: - Minimal request contract
 
-/// A single outgoing HTTP exchange, described but never performed.
-///
-/// This is a value type only: nothing in this module sends it, so there is no
-/// networking dependency here and a Linux build carries none either.
-struct VisionTransportRequest:
+/// Request-construction failures raised before any network access;
+/// associated values carry no image data or credential.
+enum VisionRequestError:
+    Error,
     Sendable,
     Equatable
 {
+    case unsupportedMimeType(mimeType: String)
+    case imageTooLarge(byteCount: Int, maxImageBytes: Int)
+    case emptyImageData
+}
+
+/// A single outgoing HTTP exchange, described but never performed. Nothing in
+/// this module sends it, so there is no networking dependency here. The real
+/// `Authorization` header lives in ``headers`` for a downstream Transport, but
+/// every description channel redacts it. Not `Equatable` (no production use).
+struct VisionTransportRequest:
+    Sendable,
+    CustomStringConvertible,
+    CustomDebugStringConvertible,
+    CustomReflectable
+{
     static let authorizationHeaderName = "Authorization"
+    static let redactionMarker = "[REDACTED]"
 
     let url: URL
     let method: String
@@ -186,16 +201,56 @@ struct VisionTransportRequest:
         self.timeout = timeout
     }
 
-    /// Builds the chat-completions request for one image.
-    ///
-    /// This is the single boundary at which a credential is read: the secret
-    /// goes into the `Authorization` header and nowhere else, and in
-    /// particular never into ``body``.
+    private var redactedHeaders: [String: String] {
+        Dictionary(uniqueKeysWithValues: headers.map { name, value in
+            (name, Self.isAuthorizationHeader(name) ? Self.redactionMarker : value)
+        })
+    }
+
+    private static func isAuthorizationHeader(_ name: String) -> Bool {
+        name.lowercased() == authorizationHeaderName.lowercased()
+    }
+
+    var description: String {
+        "VisionTransportRequest(method: \(method), url: \(url.absoluteString), "
+            + "timeout: \(timeout), bodyBytes: \(body.count), headers: \(redactedHeaders))"
+    }
+
+    var debugDescription: String { description }
+
+    var customMirror: Mirror {
+        Mirror(
+            self,
+            children: [
+                "url": url, "method": method, "headers": redactedHeaders,
+                "bodyBytes": body.count, "timeout": timeout,
+            ],
+            displayStyle: .struct
+        )
+    }
+
+    /// Builds the chat-completions request for one image. The credential is
+    /// read once into the `Authorization` header and nowhere else. Image
+    /// boundaries are enforced before the body is encoded.
     static func chatCompletion(
         configuration: VisionProviderConfiguration,
         image: VisionImagePayload,
         credential: VisionCredential
     ) throws -> VisionTransportRequest {
+        guard !image.data.isEmpty else {
+            throw VisionRequestError.emptyImageData
+        }
+        guard configuration.allowsMimeType(image.mimeType) else {
+            throw VisionRequestError.unsupportedMimeType(
+                mimeType: image.mimeType
+            )
+        }
+        guard configuration.allowsByteCount(image.data.count) else {
+            throw VisionRequestError.imageTooLarge(
+                byteCount: image.data.count,
+                maxImageBytes: configuration.maxImageBytes
+            )
+        }
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         let body = try encoder.encode(
