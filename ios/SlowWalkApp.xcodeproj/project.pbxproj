@@ -11,11 +11,16 @@
 		7C15387A301849410049DF05 /* SlowWalkClientCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7C153879301849410049DF05 /* SlowWalkClientCore */; };
 		7C15387C301849410049DF05 /* SlowWalkDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 7C15387B301849410049DF05 /* SlowWalkDomain */; };
 		7CFA0B010000000000000010 /* SlowWalkDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 7CFA0B020000000000000011 /* SlowWalkDomain */; };
+		7CFA0B100000000000000010 /* SlowWalkWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 7CFA0B110000000000000001 /* SlowWalkWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		7CFA0B200000000000000020 /* SlowWalkActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CFA0B220000000000000022 /* SlowWalkActivityAttributes.swift */; };
+		7CFA0B210000000000000021 /* SlowWalkActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CFA0B220000000000000022 /* SlowWalkActivityAttributes.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		7C96080A3018333F0081BCFA /* SlowWalkApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SlowWalkApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		7CFA0A010000000000000001 /* SlowWalkAppTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SlowWalkAppTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		7CFA0B110000000000000001 /* SlowWalkWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = SlowWalkWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		7CFA0B220000000000000022 /* SlowWalkActivityAttributes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SlowWalkActivityAttributes.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXContainerItemProxy section */
@@ -26,7 +31,28 @@
 			remoteGlobalIDString = 7C9608093018333F0081BCFA;
 			remoteInfo = SlowWalkApp;
 		};
+		7CFA0B170000000000000007 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 7C9608023018333F0081BCFA /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7CFA0B160000000000000006;
+			remoteInfo = SlowWalkWidget;
+		};
 /* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		7CFA0B190000000000000009 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				7CFA0B100000000000000010 /* SlowWalkWidget.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
 		7C153881301850F80049DF05 /* Exceptions for "SlowWalkApp" folder in "SlowWalkApp" target */ = {
@@ -36,6 +62,13 @@
 				Resources/README.md,
 			);
 			target = 7C9608093018333F0081BCFA /* SlowWalkApp */;
+		};
+		7CFA0B240000000000000024 /* Exceptions for "SlowWalkWidget" folder in "SlowWalkWidget" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+			);
+			target = 7CFA0B160000000000000006 /* SlowWalkWidget */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -51,6 +84,14 @@
 		7CFA0A020000000000000002 /* SlowWalkAppTests */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = SlowWalkAppTests;
+			sourceTree = "<group>";
+		};
+		7CFA0B120000000000000002 /* SlowWalkWidget */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				7CFA0B240000000000000024 /* Exceptions for "SlowWalkWidget" folder in "SlowWalkWidget" target */,
+			);
+			path = SlowWalkWidget;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -74,6 +115,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7CFA0B130000000000000003 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -82,6 +130,8 @@
 			children = (
 				7C96080C3018333F0081BCFA /* SlowWalkApp */,
 				7CFA0A020000000000000002 /* SlowWalkAppTests */,
+				7CFA0B120000000000000002 /* SlowWalkWidget */,
+				7CFA0B230000000000000023 /* SlowWalkShared */,
 				7C96080B3018333F0081BCFA /* Products */,
 			);
 			sourceTree = "<group>";
@@ -91,8 +141,17 @@
 			children = (
 				7C96080A3018333F0081BCFA /* SlowWalkApp.app */,
 				7CFA0A010000000000000001 /* SlowWalkAppTests.xctest */,
+				7CFA0B110000000000000001 /* SlowWalkWidget.appex */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		7CFA0B230000000000000023 /* SlowWalkShared */ = {
+			isa = PBXGroup;
+			children = (
+				7CFA0B220000000000000022 /* SlowWalkActivityAttributes.swift */,
+			);
+			path = SlowWalkShared;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -105,10 +164,12 @@
 				7C9608063018333F0081BCFA /* Sources */,
 				7C9608073018333F0081BCFA /* Frameworks */,
 				7C9608083018333F0081BCFA /* Resources */,
+				7CFA0B190000000000000009 /* Embed App Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				7CFA0B180000000000000008 /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				7C96080C3018333F0081BCFA /* SlowWalkApp */,
@@ -147,6 +208,26 @@
 			productReference = 7CFA0A010000000000000001 /* SlowWalkAppTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		7CFA0B160000000000000006 /* SlowWalkWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7CFA0B1C000000000000000C /* Build configuration list for PBXNativeTarget "SlowWalkWidget" */;
+			buildPhases = (
+				7CFA0B150000000000000005 /* Sources */,
+				7CFA0B130000000000000003 /* Frameworks */,
+				7CFA0B140000000000000004 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				7CFA0B120000000000000002 /* SlowWalkWidget */,
+			);
+			name = SlowWalkWidget;
+			productName = SlowWalkWidget;
+			productReference = 7CFA0B110000000000000001 /* SlowWalkWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -163,6 +244,9 @@
 					7CFA0A060000000000000006 = {
 						CreatedOnToolsVersion = 26.6;
 						TestTargetID = 7C9608093018333F0081BCFA /* SlowWalkApp */;
+					};
+					7CFA0B160000000000000006 = {
+						CreatedOnToolsVersion = 26.6;
 					};
 				};
 			};
@@ -185,6 +269,7 @@
 			targets = (
 				7C9608093018333F0081BCFA /* SlowWalkApp */,
 				7CFA0A060000000000000006 /* SlowWalkAppTests */,
+				7CFA0B160000000000000006 /* SlowWalkWidget */,
 			);
 		};
 /* End PBXProject section */
@@ -204,6 +289,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7CFA0B140000000000000004 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
@@ -211,6 +303,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7CFA0B200000000000000020 /* SlowWalkActivityAttributes.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -221,6 +314,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7CFA0B150000000000000005 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				7CFA0B210000000000000021 /* SlowWalkActivityAttributes.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
@@ -228,6 +329,11 @@
 			isa = PBXTargetDependency;
 			target = 7C9608093018333F0081BCFA /* SlowWalkApp */;
 			targetProxy = 7CFA0A070000000000000007 /* PBXContainerItemProxy */;
+		};
+		7CFA0B180000000000000008 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7CFA0B160000000000000006 /* SlowWalkWidget */;
+			targetProxy = 7CFA0B170000000000000007 /* PBXContainerItemProxy */;
 		};
 /* End PBXTargetDependency section */
 
@@ -354,6 +460,7 @@
 		7C960816301833410081BCFA /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
@@ -362,6 +469,10 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "用于拍摄药品包装，在您的设备上离线识别文字，帮助核对药品信息。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于在步行外出时提供路线与驻留安全提醒，位置数据仅在您的设备上使用。";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于从相册选择药品包装照片，在您的设备上离线识别文字。";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -394,6 +505,7 @@
 		7C960817301833410081BCFA /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				ALWAYS_EMBED_SWIFT_STANDARD_LIBRARIES = YES;
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
@@ -402,6 +514,10 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_NSCameraUsageDescription = "用于拍摄药品包装，在您的设备上离线识别文字，帮助核对药品信息。";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于在步行外出时提供路线与驻留安全提醒，位置数据仅在您的设备上使用。";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于从相册选择药品包装照片，在您的设备上离线识别文字。";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -477,6 +593,68 @@
 			};
 			name = Release;
 		};
+		7CFA0B1A000000000000000A /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SlowWalkWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "慢走组件";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.creaope.slowwalk.widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		7CFA0B1B000000000000000B /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = SlowWalkWidget/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "慢走组件";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.creaope.slowwalk.widget;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				PROVISIONING_PROFILE_SPECIFIER = "";
+				SKIP_INSTALL = YES;
+				SUPPORTED_PLATFORMS = "iphoneos iphonesimulator";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_STRICT_CONCURRENCY = complete;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -503,6 +681,15 @@
 			buildConfigurations = (
 				7CFA0A090000000000000009 /* Debug */,
 				7CFA0A0A000000000000000A /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7CFA0B1C000000000000000C /* Build configuration list for PBXNativeTarget "SlowWalkWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7CFA0B1A000000000000000A /* Debug */,
+				7CFA0B1B000000000000000B /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
