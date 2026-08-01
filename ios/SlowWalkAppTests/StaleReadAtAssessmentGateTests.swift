@@ -80,9 +80,9 @@ struct StaleReadAtAssessmentGateTests {
         }
         #expect(resultRecords.isEmpty)
 
-        // Exactly the legitimate records, in order: the read that started, the
-        // confirmation, and the missing assessment. Nothing from the stale
-        // read's resolution, and no care action.
+        // Exactly the legitimate records, in order: the read that started and
+        // the confirmation. Nothing from the stale read's resolution, no
+        // care action, and no fabricated assessment setback (C1).
         let outingTitle = TodayPlan.demo.outing?.title ?? "今日用药"
         #expect(store.kinds == [
             .dayPlanItemStarted(title: outingTitle),
@@ -91,7 +91,6 @@ struct StaleReadAtAssessmentGateTests {
                 medicineName: MedicineCandidate.demoFrequentlyUsed[0].displayName,
                 origin: .chosenFromFrequentList
             ),
-            .medicineAssessmentDidNotSucceed(.capabilityNotAvailableYet),
         ])
     }
 
@@ -218,11 +217,11 @@ struct StaleReadAtAssessmentGateTests {
 
     // MARK: - 7. Repeated confirmation writes one record
 
-    /// Confirming the same candidate twice writes one confirmation and one
-    /// missing-assessment record.
+    /// Confirming the same candidate twice writes one confirmation record.
     ///
     /// The second confirmation is refused because the session has left the
-    /// confirmation state, so no side effect may follow it.
+    /// confirmation state, so no side effect may follow it. C1 writes no
+    /// assessment setback record.
     @Test func repeatedConfirmationWritesOneCareRecord() async {
         let delay = ControllableReadDelay()
         let store = RecordingCareRecordStore()
@@ -253,11 +252,12 @@ struct StaleReadAtAssessmentGateTests {
         }
         #expect(confirmed.count == 1)
 
+        // C1: no assessment setback record is fabricated.
         let notAssessed = store.kinds.filter { kind in
             if case .medicineAssessmentDidNotSucceed = kind { return true }
             return false
         }
-        #expect(notAssessed.count == 1)
+        #expect(notAssessed.count == 0)
     }
 
     /// Confirming again after reconsidering writes a second, legitimate

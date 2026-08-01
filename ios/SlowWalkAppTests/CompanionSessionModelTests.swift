@@ -235,13 +235,12 @@ struct CompanionSessionModelTests {
         }.count
         #expect(actionCount == 0)
 
-        // The one record that *is* written for the missing assessment is
-        // written once, not once per confirmation attempt.
+        // C1: no assessment setback record is fabricated.
         let notAssessedCount = store.kinds.filter { kind in
             if case .medicineAssessmentDidNotSucceed = kind { return true }
             return false
         }.count
-        #expect(notAssessedCount == 1)
+        #expect(notAssessedCount == 0)
     }
 
     // MARK: - retry / retake start a fresh read

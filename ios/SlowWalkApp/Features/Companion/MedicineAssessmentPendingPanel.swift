@@ -122,7 +122,7 @@ struct CapabilityStatusList: View {
                 origin: .readFromPhoto,
                 attemptNumber: 1
             ),
-            progress: .couldNotAssess(.notWiredUpYet)
+            latestUpdate: nil
         ),
         assessmentStatus: CapabilityCatalog.phase0
             .status(of: .medicineRiskAssessment)
