@@ -7,7 +7,11 @@ struct RecognitionCacheSnapshot: Sendable, Equatable {
     let capturedAt: Date
     let ocrVersion: String
     let isOfflineRecognition: Bool
-    let observations: [VisionObservationNormalizer.NormalizedObservation]
+    /// Raw platform-neutral observations in the persisted `sortIndex`
+    /// order. Trimming, clamping, and canonical ordering are owned solely
+    /// by `MedicineRecognitionInputMapper` in SlowWalkCore and are applied
+    /// at the assessment boundary, never by this cache.
+    let observations: [RecognizedTextObservation]
 }
 
 @MainActor
@@ -26,10 +30,13 @@ final class RecognitionCacheRepository {
     /// `capturedAt` records when the image was taken; the expiry clock always
     /// starts from the moment the record is persisted (`now`), so a device
     /// clock change cannot make a freshly saved record look already expired.
+    ///
+    /// Observations are stored verbatim, in the order supplied by the
+    /// caller; `sortIndex` only preserves that persistence order.
     func save(
         requestID: UUID,
         capturedAt: Date,
-        observations: [VisionObservationNormalizer.NormalizedObservation],
+        observations: [RecognizedTextObservation],
         ocrVersion: String,
         isOfflineRecognition: Bool,
         now: Date = Date()
@@ -90,12 +97,6 @@ final class RecognitionCacheRepository {
     func deleteExpired(now: Date = Date()) throws {
         try deleteExpiredRecords(now: now)
         try context.save()
-    }
-
-    func medicineReferenceCount() throws -> Int {
-        try context.fetchCount(
-            FetchDescriptor<LocalMedicineReference>()
-        )
     }
 
     private func deleteRecords(requestID: UUID) throws {
@@ -160,7 +161,7 @@ final class RecognitionCacheRepository {
                 } else {
                     region = nil
                 }
-                return VisionObservationNormalizer.NormalizedObservation(
+                return RecognizedTextObservation(
                     text: observation.text,
                     confidence: observation.confidence,
                     boundingRegion: region,

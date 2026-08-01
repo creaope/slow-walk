@@ -12,7 +12,6 @@ enum SlowWalkPersistenceSchemaV1: VersionedSchema {
         [
             RecognitionCacheRecord.self,
             RecognitionCacheObservationRecord.self,
-            LocalMedicineReference.self,
         ]
     }
 }

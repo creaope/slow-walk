@@ -22,10 +22,8 @@ struct RecognitionCacheRepositoryTests {
         )
     }
 
-    private func observation(_ text: String) -> VisionObservationNormalizer
-        .NormalizedObservation
-    {
-        VisionObservationNormalizer.NormalizedObservation(
+    private func observation(_ text: String) -> RecognizedTextObservation {
+        RecognizedTextObservation(
             text: text,
             confidence: 0.5,
             boundingRegion: OCRBoundingRegion(
@@ -113,11 +111,6 @@ struct RecognitionCacheRepositoryTests {
         )
     }
 
-    @Test func medicineReferenceSchemaStartsEmpty() throws {
-        let repository = try makeRepository()
-        #expect(try repository.medicineReferenceCount() == 0)
-    }
-
     @Test func fetchDoesNotReturnExpiredRecord() throws {
         let repository = try makeRepository()
         let requestID = UUID()
@@ -203,6 +196,228 @@ struct RecognitionCacheRepositoryTests {
         #expect(try repository.fetch(requestID: freshID, now: now) != nil)
     }
 
+    /// The cache stores observations verbatim: no trimming, no clamping,
+    /// no filtering, no reordering. Canonical normalization is owned solely
+    /// by `MedicineRecognitionInputMapper` in SlowWalkCore.
+    @Test func roundTripPreservesObservationsVerbatim() throws {
+        let repository = try makeRepository()
+        let requestID = UUID()
+        let base = Date()
+        let observations = [
+            // Deliberately unsorted (bottom row first) and unnormalized.
+            RecognizedTextObservation(
+                text: "  bottom row  ",
+                confidence: 1.7,
+                boundingRegion: OCRBoundingRegion(
+                    x: 0.7,
+                    y: 0.9,
+                    width: 0.2,
+                    height: 0.1
+                ),
+                languageCode: " zh-Hans ",
+                observedAt: Date(timeIntervalSince1970: 20)
+            ),
+            RecognizedTextObservation(
+                text: " ",
+                confidence: -0.4,
+                boundingRegion: nil,
+                languageCode: nil,
+                observedAt: Date(timeIntervalSince1970: 10)
+            ),
+            RecognizedTextObservation(
+                text: "top row",
+                confidence: 0.3,
+                boundingRegion: OCRBoundingRegion(
+                    x: 0.1,
+                    y: 0.1,
+                    width: 0.2,
+                    height: 0.1
+                ),
+                languageCode: "en",
+                observedAt: Date(timeIntervalSince1970: 30)
+            ),
+        ]
+
+        try repository.save(
+            requestID: requestID,
+            capturedAt: base,
+            observations: observations,
+            ocrVersion: "vision-1",
+            isOfflineRecognition: true,
+            now: base
+        )
+
+        let snapshot = try repository.fetch(requestID: requestID, now: base)
+        #expect(snapshot?.observations == observations)
+        #expect(snapshot?.capturedAt == base)
+        #expect(snapshot?.ocrVersion == "vision-1")
+        #expect(snapshot?.isOfflineRecognition == true)
+    }
+
+    /// SQLite stores NaN as NULL, so a NaN confidence does not round-trip
+    /// verbatim and reads back finite. This is behaviorally safe: Core's
+    /// canonical mapper maps every non-finite confidence to 0, so the
+    /// assessment-boundary result is identical with or without the cache.
+    @Test func nanConfidenceKeepsCoreMapperResult() throws {
+        let repository = try makeRepository()
+        let requestID = UUID()
+        let capturedAt = Date(timeIntervalSince1970: 500)
+        let observations = [
+            RecognizedTextObservation(
+                text: "nan",
+                confidence: .nan,
+                boundingRegion: nil,
+                languageCode: nil,
+                observedAt: Date(timeIntervalSince1970: 10)
+            ),
+        ]
+        let mapper = MedicineRecognitionInputMapper(
+            configuration: try MedicineRecognitionMappingConfiguration(
+                minimumConfidence: 0.3,
+                lowConfidenceHandling: .retainAsEvidence
+            )
+        )
+        let direct = mapper.map(
+            observations: observations,
+            capturedAt: capturedAt
+        )
+
+        try repository.save(
+            requestID: requestID,
+            capturedAt: capturedAt,
+            observations: observations,
+            ocrVersion: "vision-1",
+            isOfflineRecognition: true,
+            now: capturedAt
+        )
+        let snapshot = try repository.fetch(
+            requestID: requestID,
+            now: capturedAt
+        )
+
+        #expect(
+            snapshot?.observations.first?.confidence.isFinite == true
+        )
+        let roundTripped = mapper.map(
+            observations: try #require(snapshot?.observations),
+            capturedAt: try #require(snapshot?.capturedAt)
+        )
+        #expect(roundTripped == direct)
+    }
+
+    /// Contract test: feeding Core's canonical mapper with observations
+    /// after a cache round-trip must produce exactly the same
+    /// `MedicineRecognitionInput` as feeding it the originals. Together
+    /// with `roundTripPreservesObservationsVerbatim` this proves the app
+    /// keeps no second copy of the canonical normalization rules.
+    @Test func cacheRoundTripPreservesCoreMapperResult() throws {
+        let repository = try makeRepository()
+        let requestID = UUID()
+        let capturedAt = Date(timeIntervalSince1970: 500)
+        let observations = [
+            RecognizedTextObservation(
+                text: "  Second row  ",
+                confidence: 0.6,
+                boundingRegion: OCRBoundingRegion(
+                    x: 0.1,
+                    y: 0.5,
+                    width: 0.2,
+                    height: 0.1
+                ),
+                languageCode: " zh-Hans ",
+                observedAt: Date(timeIntervalSince1970: 100)
+            ),
+            RecognizedTextObservation(
+                text: " \n ",
+                confidence: 2,
+                boundingRegion: nil,
+                languageCode: " ",
+                observedAt: Date(timeIntervalSince1970: 100)
+            ),
+            RecognizedTextObservation(
+                text: "First row right",
+                confidence: -1,
+                boundingRegion: OCRBoundingRegion(
+                    x: 0.7,
+                    y: 0.1,
+                    width: 0.2,
+                    height: 0.1
+                ),
+                languageCode: "zh-Hans",
+                observedAt: Date(timeIntervalSince1970: 100)
+            ),
+            RecognizedTextObservation(
+                text: "First row left",
+                confidence: 0.8,
+                boundingRegion: OCRBoundingRegion(
+                    x: 0.1,
+                    y: 0.1,
+                    width: 0.2,
+                    height: 0.1
+                ),
+                languageCode: "zh-Hans",
+                observedAt: Date(timeIntervalSince1970: 100)
+            ),
+        ]
+        let mapper = MedicineRecognitionInputMapper(
+            configuration: try MedicineRecognitionMappingConfiguration(
+                minimumConfidence: 0.3,
+                lowConfidenceHandling: .retainAsEvidence
+            )
+        )
+        let direct = mapper.map(
+            observations: observations,
+            capturedAt: capturedAt
+        )
+
+        try repository.save(
+            requestID: requestID,
+            capturedAt: capturedAt,
+            observations: observations,
+            ocrVersion: "vision-1",
+            isOfflineRecognition: true,
+            now: capturedAt
+        )
+        let snapshot = try repository.fetch(
+            requestID: requestID,
+            now: capturedAt
+        )
+        let roundTripped = mapper.map(
+            observations: try #require(snapshot?.observations),
+            capturedAt: try #require(snapshot?.capturedAt)
+        )
+
+        #expect(roundTripped == direct)
+        #expect(roundTripped.recognizedTexts == [
+            "First row left",
+            "First row right",
+            "Second row",
+        ])
+    }
+
+    /// The persisted schema must not contain any field capable of holding
+    /// the original image bytes.
+    @Test func persistenceSchemaHasNoImageDataField() throws {
+        let container = try SlowWalkPersistenceSchema
+            .makeInMemoryContainer()
+        let entities = container.schema.entities
+        #expect(entities.map(\.name).sorted() == [
+            "RecognitionCacheObservationRecord",
+            "RecognitionCacheRecord",
+        ])
+        for entity in entities {
+            for property in entity.properties {
+                let holdsData =
+                    property.valueType == Data.self
+                    || property.valueType == Data?.self
+                #expect(!holdsData)
+                #expect(
+                    !property.name.lowercased().contains("image")
+                )
+            }
+        }
+    }
+
     @Test func onDiskContainerIsCreatable() throws {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent(UUID().uuidString)
@@ -214,7 +429,7 @@ struct RecognitionCacheRepositoryTests {
         )
         let context = ModelContext(container)
         let count = try context.fetchCount(
-            FetchDescriptor<LocalMedicineReference>()
+            FetchDescriptor<RecognitionCacheRecord>()
         )
         #expect(count == 0)
     }
