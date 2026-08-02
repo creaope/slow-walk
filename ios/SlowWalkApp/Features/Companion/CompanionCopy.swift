@@ -1,4 +1,5 @@
 import Foundation
+import SlowWalkClientCore
 
 /// Every user-facing string for the companion flow.
 ///
@@ -47,8 +48,8 @@ enum CompanionCopy {
             attempt.isAwaitingRecovery ? "需要再试一次" : "正在模拟识别"
         case .awaitingMedicineConfirmation:
             "请确认药名"
-        case .awaitingMedicineAssessment:
-            "尚未完成风险评估"
+        case let .awaitingMedicineAssessment(gate):
+            assessmentGateHeading(gate)
         case .travelling:
             "出行途中"
         case .approachingStop:
@@ -58,6 +59,29 @@ enum CompanionCopy {
             case .arrivedSafely: "已安全结束"
             case .endedEarly: "已提前结束"
             }
+        }
+    }
+
+    /// A single heading for the assessment gate, shared by the step summary,
+    /// the visible pending panel, and its VoiceOver description.
+    ///
+    /// The switch is exhaustive over the canonical state and deliberately
+    /// describes only lifecycle progress. Risk, ActionCard content, and other
+    /// medical meaning remain owned by the canonical result presentation.
+    static func assessmentGateHeading(
+        _ gate: MedicineAssessmentGate
+    ) -> String {
+        switch gate.assessmentState {
+        case .idle, .recognizing, .assessing:
+            "尚未完成风险评估"
+        case .requiresMedicineConfirmation:
+            "需要进一步确认药名"
+        case .result:
+            "评估结果已生成，等待展示"
+        case .failed:
+            "评估未能完成"
+        case .cancelled:
+            "评估已取消"
         }
     }
 
@@ -101,7 +125,7 @@ enum CompanionCopy {
             // unavailable, so no route exists to record.
             "出行步骤已经开始。本阶段使用演示位置，不记录真实路线。"
         case .approachingStop:
-            "这是演示中的“即将到站”步骤，由手动操作触发。"
+            "这是演示中的\u{201c}即将到站\u{201d}步骤，由手动操作触发。"
         case let .completed(completion):
             switch completion {
             case .arrivedSafely:
@@ -116,7 +140,7 @@ enum CompanionCopy {
     static func nextStep(for state: CompanionFlowState) -> String {
         switch state {
         case .notStarted:
-            "准备好以后，点击“开始陪伴”。"
+            "准备好以后，点击\u{201c}开始陪伴\u{201d}。"
         case .preDepartureCheck:
             "先确认要带的药，再出门。"
         case let .scanningMedicine(attempt):
@@ -166,32 +190,43 @@ enum CompanionCopy {
         }
     }
 
-    /// What the assessment gate says, derived from the capability table.
+    /// What the assessment gate says, derived from the canonical assessment
+    /// state.
     ///
     /// This is the one screen that must never overstate: a person held here has
     /// confirmed a medicine and may reasonably expect to be told something
-    /// about it. The wording therefore states twice over that nothing was
-    /// assessed — once as the situation, once as the reason.
+    /// about it. The wording therefore states plainly what the canonical state
+    /// is, and never fabricates a risk level or a medicine conclusion.
     ///
-    /// The explanatory line comes from the passed-in catalog. When
-    /// `.medicineRiskAssessment` becomes `.deviceLocal`, that catalog's detail
-    /// changes and this sentence follows, rather than keeping a "尚未接入"
-    /// explanation written into the wording itself.
+    /// The switch is exhaustive over all seven canonical cases. A new case
+    /// added to `MedicineAssessmentViewState` breaks the build here, forcing a
+    /// deliberate wording decision.
     private static func assessmentGateSituation(
         _ gate: MedicineAssessmentGate,
         capabilities: CapabilityCatalog
     ) -> String {
         let name = gate.confirmed.candidate.displayName
-        switch gate.progress {
-        case .notStarted:
-            return "已确认药名：\(name)。正在等待正式的用药风险评估。"
-        case let .couldNotAssess(setback):
-            switch setback {
-            case .notWiredUpYet:
-                let detail = capabilities.detail(of: .medicineRiskAssessment)
-                    ?? "设备内评估将在下一阶段接入。"
-                return "已确认药名：\(name)，但本阶段尚未完成风险评估。\(detail)"
-            }
+        switch gate.assessmentState {
+        case .idle:
+            return "已确认药名：\(name)。尚未开始正式评估。"
+        case .recognizing:
+            return "已确认药名：\(name)。正在进行文字识别。"
+        case .requiresMedicineConfirmation:
+            return "已确认药名：\(name)。系统需要进一步确认药名。"
+        case .assessing:
+            return "已确认药名：\(name)。正在进行正式评估。"
+        case .result:
+            // States the result exists without describing it — the
+            // description belongs to SlowWalkPresentation, not here.
+            // Never copies the ActionCard wording, risk level, or
+            // any clinical claim.
+            return "已确认药名：\(name)。正式评估结果已生成，等待展示。"
+        case .failed:
+            let detail = capabilities.detail(of: .medicineRiskAssessment)
+                ?? "评估未能完成。"
+            return "已确认药名：\(name)，但评估未能完成。\(detail)"
+        case .cancelled:
+            return "已确认药名：\(name)，评估已取消。"
         }
     }
 

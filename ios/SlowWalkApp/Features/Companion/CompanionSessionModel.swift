@@ -1,4 +1,5 @@
 import Foundation
+import SlowWalkClientCore
 
 /// Owns the live companion session: current state, side effects, and records.
 ///
@@ -81,18 +82,28 @@ final class CompanionSessionModel {
 
     /// Whether the session may leave for the outing.
     ///
-    /// Departure is only legitimate once a formal assessment has produced a
-    /// result. This switch is exhaustive over `MedicineAssessmentProgress`, and
-    /// neither of its cases is a result, so the answer today is always `false`.
-    /// Written this way on purpose: adding a success case to the progress enum
-    /// makes this switch non-exhaustive and forces the departure rule to be
-    /// stated deliberately, instead of a `true` appearing by default.
+    /// True only when a formal assessment has produced a `.result` AND an
+    /// outing is planned. The session remains at the gate in C1 — this is
+    /// qualification, not an automatic transition.
     var canDepart: Bool {
-        guard let gate = assessmentGate else { return false }
-        switch gate.progress {
-        case .notStarted, .couldNotAssess:
-            return false
-        }
+        guard let gate = assessmentGate,
+              case .result = gate.assessmentState,
+              plan.outing != nil
+        else { return false }
+        return true
+    }
+
+    /// Whether a medicine-only session has earned its completion qualification.
+    ///
+    /// True only when a formal assessment has produced a `.result` AND no
+    /// outing is planned. The session stays at the gate — this is
+    /// qualification, not an automatic transition.
+    var canCompleteMedicineCheck: Bool {
+        guard let gate = assessmentGate,
+              case .result = gate.assessmentState,
+              plan.outing == nil
+        else { return false }
+        return true
     }
 
     /// Recovery choices offered when a read did not succeed.
@@ -170,7 +181,10 @@ final class CompanionSessionModel {
         // result that was in flight when it was made must not land afterwards
         // and reopen a step the person has already left.
         invalidatePendingRead()
-        beginMedicineAssessment()
+        // C1: the gate is entered with `latestUpdate: nil` (semantically
+        // `.idle`). No assessment setback is fabricated, and no
+        // `medicineAssessmentDidNotSucceed` care record is written. The
+        // session simply waits for a canonical state update.
     }
 
     /// Goes back to the candidate list to choose a different medicine.
@@ -196,38 +210,15 @@ final class CompanionSessionModel {
     }
 
     // MARK: - Medicine assessment
-    //
-    // This build has no assessment adapter. Rather than let the flow sit at a
-    // gate that never resolves, the missing capability is reported as a
-    // setback, so the person is offered a way out immediately and the screen
-    // states plainly that no assessment was made.
 
-    /// Reports the assessment outcome for the medicine just confirmed.
+    /// Applies a canonical state update from the medicine assessment
+    /// coordinator.
     ///
-    /// The outcome is read from `capabilities`, not hardcoded, so the single
-    /// capability table decides what happens here. There is deliberately no
-    /// branch that produces a result: `MedicineAssessmentProgress` has no
-    /// success case to produce one with, so this method cannot fabricate an
-    /// assessment even if the capability table claimed the capability existed.
-    private func beginMedicineAssessment() {
-        guard capabilities
-            .availability(of: .medicineRiskAssessment)
-            .isImplemented == false
-        else {
-            // A capability table claiming assessment works, with no adapter to
-            // honour it, must not silently become an assessed medicine. The
-            // gate stays at `.notStarted`: no card, no record, no departure.
-            return
-        }
-        guard send(.medicineAssessmentDidNotSucceed(.notWiredUpYet)) else { return }
-        // Converted on this side of the boundary: the timeline stores a Care
-        // Records reason, never the Companion setback itself, so the record
-        // vocabulary does not move when the flow's states do.
-        records.append(
-            .medicineAssessmentDidNotSucceed(
-                MedicineAssessmentSetback.notWiredUpYet.careRecordReason
-            )
-        )
+    /// The reducer rejects stale or duplicate updates by `sequenceNumber`.
+    /// No care record is written here — `careActionShown` may only be written
+    /// once a real result has been displayed, which is not part of C1.
+    func applyAssessmentStateUpdate(_ update: MedicineAssessmentStateUpdate) {
+        guard send(.medicineAssessmentStateDidUpdate(update)) else { return }
     }
 
     // MARK: - Simulated read
@@ -309,29 +300,6 @@ enum CompanionRecoveryOption: Identifiable, Equatable, Hashable, CaseIterable {
         case .retryPhoto: CompanionCopy.retryPhotoTitle
         case .chooseFromList: CompanionCopy.chooseFromListTitle
         case .contactSomeone: CompanionCopy.contactSomeoneTitle
-        }
-    }
-}
-
-/// Translates a Companion setback into the Care Records vocabulary.
-///
-/// The one place the two vocabularies meet, and it sits on the Companion side on
-/// purpose: the flow knows about the timeline it writes to, while Care Records
-/// knows nothing about the flow's internal states. `CareRecordEvent.swift`
-/// therefore names reasons only and never mentions a Companion type.
-///
-/// `private` so the conversion cannot become an API other layers reach for; a
-/// second caller would be a second place the boundary is decided.
-///
-/// The `switch` is exhaustive, so a new Companion setback cannot reach the
-/// timeline until it has been given a deliberate record meaning — which is the
-/// point of keeping the types separate. Mapping a new setback onto an existing
-/// reason is a decision, not a default.
-private extension MedicineAssessmentSetback {
-    var careRecordReason: CareRecordIncompleteReason {
-        switch self {
-        case .notWiredUpYet:
-            return .capabilityNotAvailableYet
         }
     }
 }

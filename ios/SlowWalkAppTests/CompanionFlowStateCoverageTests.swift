@@ -69,7 +69,7 @@ struct CompanionFlowStateCoverageTests {
         case medicineCandidatesReady
         case retakeMedicinePhoto
         case confirmMedicine
-        case medicineAssessmentDidNotSucceed
+        case medicineAssessmentStateDidUpdate
         case reconsiderMedicineChoice
         case approachStop
         case arriveSafely
@@ -86,7 +86,7 @@ struct CompanionFlowStateCoverageTests {
         case .medicineCandidatesReady: .medicineCandidatesReady
         case .retakeMedicinePhoto: .retakeMedicinePhoto
         case .confirmMedicine: .confirmMedicine
-        case .medicineAssessmentDidNotSucceed: .medicineAssessmentDidNotSucceed
+        case .medicineAssessmentStateDidUpdate: .medicineAssessmentStateDidUpdate
         case .reconsiderMedicineChoice: .reconsiderMedicineChoice
         case .approachStop: .approachStop
         case .arriveSafely: .arriveSafely
@@ -107,77 +107,41 @@ struct CompanionFlowStateCoverageTests {
         )
     }
 
-    // MARK: - Assessment progress
+    // MARK: - Gate update sweep
 
-    /// Every progress value is swept, including each setback.
+    /// Every canonical `MedicineAssessmentViewState` case appears in the gate
+    /// update sweep.
     ///
-    /// `MedicineAssessmentSetback` is `CaseIterable`, so this one can be checked
-    /// against the real case list rather than a mirror of it.
-    @Test func everyProgressFixtureCoversEverySetback() {
-        let coveredSetbacks = Set(
-            MedicineAssessmentGateTests.everyProgress.compactMap(\.setback)
-        )
-        #expect(coveredSetbacks == Set(MedicineAssessmentSetback.allCases))
-
-        // And the waiting value itself, which carries no setback.
-        #expect(MedicineAssessmentGateTests.everyProgress.contains(.notStarted))
-    }
-
-    /// No progress value means "assessed".
-    ///
-    /// This is the structural guarantee the whole gate rests on: nothing in this
-    /// build can produce an assessment result, so no code path can present one.
-    /// A success case added to `MedicineAssessmentProgress` must break this
-    /// test, forcing the departure and card rules to be revisited deliberately.
-    @Test func noProgressValueCarriesAnAssessmentResult() {
-        for progress in MedicineAssessmentGateTests.everyProgress {
-            switch progress {
-            case .notStarted, .couldNotAssess:
-                // Neither carries a result. Adding a case that does makes this
-                // switch non-exhaustive.
-                break
+    /// The exhaustive switch here matches the canonical enum's cases. A new
+    /// case added to `MedicineAssessmentViewState` breaks this file compiling,
+    /// which forces the gate sweep to be extended.
+    @Test func everyGateUpdateCoversEveryCanonicalCase() {
+        let coveredKinds: Set<String> = Set(
+            MedicineAssessmentGateTests.everyGateUpdate.compactMap { update in
+                guard let state = update?.state else { return "nil" }
+                switch state {
+                case .idle: return "idle"
+                case .recognizing: return "recognizing"
+                case .requiresMedicineConfirmation: return "requiresMedicineConfirmation"
+                case .assessing: return "assessing"
+                case .result: return "result"
+                case .failed: return "failed"
+                case .cancelled: return "cancelled"
+                }
             }
-        }
+        )
+        #expect(coveredKinds.contains("nil"), "nil (no update) must be in gate sweep")
+        #expect(coveredKinds.contains("idle"))
+        #expect(coveredKinds.contains("recognizing"))
+        #expect(coveredKinds.contains("requiresMedicineConfirmation"))
+        #expect(coveredKinds.contains("assessing"))
+        #expect(coveredKinds.contains("result"))
+        #expect(coveredKinds.contains("failed"))
+        #expect(coveredKinds.contains("cancelled"))
+        #expect(coveredKinds.count == 8) // 7 canonical + nil
     }
 
     // MARK: - Care Records boundary
-
-    /// The timeline reason a real assessment failure produces.
-    ///
-    /// The conversion itself lives on the Companion side of the boundary and is
-    /// `private` to `CompanionSessionModel.swift`, so Care Records depends on
-    /// nothing inside the flow. That means it cannot be called directly from
-    /// here — which is the point. It is checked the way it actually matters
-    /// instead: by driving the real session to the gate and reading what landed
-    /// in the timeline. A conversion that leaked a flow enum into the record, or
-    /// mapped onto the wrong reason, fails here.
-    @Test func realAssessmentFailureRecordsACareRecordReason() async {
-        let (_, store) = await MedicineAssessmentGateTests.sessionAndStoreAtGate()
-
-        let reasons: [CareRecordIncompleteReason] = store.kinds.compactMap { kind in
-            if case let .medicineAssessmentDidNotSucceed(reason) = kind {
-                return reason
-            }
-            return nil
-        }
-        #expect(reasons == [.capabilityNotAvailableYet])
-    }
-
-    /// Every Companion setback has a deliberate Care Records meaning.
-    ///
-    /// Totality is enforced at compile time, not here: the conversion is an
-    /// exhaustive `switch` over `MedicineAssessmentSetback`, so adding a setback
-    /// stops `CompanionSessionModel.swift` compiling until the new case has been
-    /// given a deliberate record meaning. Mapping a new setback onto an existing
-    /// reason is a decision, not a default.
-    ///
-    /// What this test adds is the coverage claim the check above rests on: there
-    /// is exactly one setback today, so the single production path exercised
-    /// above covers the whole setback set. A second setback makes that untrue
-    /// and fails here, forcing its record meaning to be exercised too.
-    @Test func oneSetbackExistsSoTheRealPathCoversThemAll() {
-        #expect(MedicineAssessmentSetback.allCases == [.notWiredUpYet])
-    }
 
     /// The record vocabulary carries no medical meaning.
     ///
