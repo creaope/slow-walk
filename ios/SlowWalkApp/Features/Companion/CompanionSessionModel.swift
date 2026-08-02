@@ -1,6 +1,14 @@
 import Foundation
 import SlowWalkClientCore
 
+struct MedicineAssessmentGateLease: Equatable, Sendable {
+    private let identifier: UUID
+
+    fileprivate init() {
+        identifier = UUID()
+    }
+}
+
 /// Owns the live companion session: current state, side effects, and records.
 ///
 /// All transition decisions come from `CompanionFlowReducer`. This type adds
@@ -9,12 +17,19 @@ import SlowWalkClientCore
 @Observable
 @MainActor
 final class CompanionSessionModel {
+    private enum GateLeaseChange {
+        case preserve, replace, invalidate
+    }
+
     private(set) var state: CompanionFlowState = .notStarted
+    private(set) var currentAssessmentGateLease: MedicineAssessmentGateLease?
 
     private let records: any CareRecordStoring
     private let simulator: any MedicineScanSimulating
     private let readDelay: any MedicineReadDelaying
     private let plan: TodayPlan
+    private var assessmentGateInvalidationHandler:
+        (@MainActor (MedicineAssessmentGateLease) -> Void)?
 
     /// What this build can really do.
     ///
@@ -126,7 +141,9 @@ final class CompanionSessionModel {
     /// really begun, so a refused start leaves the timeline untouched.
     @discardableResult
     func startCompanion() -> Bool {
-        guard send(.startCompanion) else { return false }
+        guard send(.startCompanion, gateLeaseChange: .invalidate) else {
+            return false
+        }
         if let outing = plan.outing {
             records.append(.dayPlanItemStarted(title: outing.title))
         } else {
@@ -155,13 +172,15 @@ final class CompanionSessionModel {
 
     /// Goes back to reading when none of the offered candidates match.
     func retakeMedicinePhoto() {
-        guard send(.retakeMedicinePhoto) else { return }
+        guard send(.retakeMedicinePhoto, gateLeaseChange: .invalidate) else {
+            return
+        }
         recordReadStartedAndRun()
     }
 
     func confirmMedicine(_ candidate: MedicineCandidate) {
         guard case let .awaitingMedicineConfirmation(prompt) = state,
-              send(.confirmMedicine(candidate))
+              send(.confirmMedicine(candidate), gateLeaseChange: .replace)
         else {
             return
         }
@@ -189,7 +208,10 @@ final class CompanionSessionModel {
 
     /// Goes back to the candidate list to choose a different medicine.
     func reconsiderMedicineChoice() {
-        guard send(.reconsiderMedicineChoice) else { return }
+        guard send(
+            .reconsiderMedicineChoice,
+            gateLeaseChange: .invalidate
+        ) else { return }
     }
 
     func approachStop() {
@@ -197,12 +219,12 @@ final class CompanionSessionModel {
     }
 
     func arriveSafely() {
-        guard send(.arriveSafely) else { return }
+        guard send(.arriveSafely, gateLeaseChange: .invalidate) else { return }
         records.append(.companionFinished(.arrivedSafely))
     }
 
     func endEarly() {
-        guard send(.endEarly) else { return }
+        guard send(.endEarly, gateLeaseChange: .invalidate) else { return }
         // The session is over; nothing from the abandoned read may land after
         // it and reopen a step the person has already left.
         invalidatePendingRead()
@@ -211,14 +233,32 @@ final class CompanionSessionModel {
 
     // MARK: - Medicine assessment
 
-    /// Applies a canonical state update from the medicine assessment
-    /// coordinator.
+    /// Applies a canonical state update delivered by the environment-owned
+    /// medicine assessment runner. The session never owns the coordinator.
     ///
     /// The reducer rejects stale or duplicate updates by `sequenceNumber`.
     /// No care record is written here — `careActionShown` may only be written
     /// once a real result has been displayed, which is not part of C1.
     func applyAssessmentStateUpdate(_ update: MedicineAssessmentStateUpdate) {
+        guard let lease = currentAssessmentGateLease else { return }
+        applyAssessmentStateUpdate(update, forGateLease: lease)
+    }
+
+    func applyAssessmentStateUpdate(
+        _ update: MedicineAssessmentStateUpdate,
+        forGateLease lease: MedicineAssessmentGateLease
+    ) {
+        guard case .awaitingMedicineAssessment = state,
+              currentAssessmentGateLease == lease
+        else { return }
         guard send(.medicineAssessmentStateDidUpdate(update)) else { return }
+    }
+
+    func installAssessmentGateInvalidationHandler(
+        _ handler: @escaping @MainActor (MedicineAssessmentGateLease) -> Void
+    ) {
+        precondition(assessmentGateInvalidationHandler == nil)
+        assessmentGateInvalidationHandler = handler
     }
 
     // MARK: - Simulated read
@@ -278,12 +318,30 @@ final class CompanionSessionModel {
     /// Deliberately not `@discardableResult`: a refused event must never be
     /// followed by the side effects of a successful one, so every caller is
     /// made to answer whether the transition happened.
-    private func send(_ event: CompanionFlowEvent) -> Bool {
+    private func send(
+        _ event: CompanionFlowEvent,
+        gateLeaseChange: GateLeaseChange = .preserve
+    ) -> Bool {
         guard let next = CompanionFlowReducer.nextState(from: state, on: event) else {
             return false
         }
+        switch gateLeaseChange {
+        case .preserve:
+            break
+        case .replace:
+            invalidateAssessmentGateLease()
+            currentAssessmentGateLease = MedicineAssessmentGateLease()
+        case .invalidate:
+            invalidateAssessmentGateLease()
+        }
         state = next
         return true
+    }
+
+    private func invalidateAssessmentGateLease() {
+        guard let lease = currentAssessmentGateLease else { return }
+        currentAssessmentGateLease = nil
+        assessmentGateInvalidationHandler?(lease)
     }
 }
 

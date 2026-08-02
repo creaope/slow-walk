@@ -1,4 +1,5 @@
 import Foundation
+import SlowWalkClientCore
 import SlowWalkDomain
 
 /// The app's composition root.
@@ -7,9 +8,9 @@ import SlowWalkDomain
 /// features. Views and models never construct a clock, a store, or a network
 /// client themselves.
 ///
-/// This stage wires demo data only. `ios/README.md` records which Apple
-/// adapters — Vision, CoreLocation, URLSession, protected storage, speech —
-/// are still unimplemented; none of them are referenced here.
+/// This stage wires the on-device Vision medicine recognizer and local demo
+/// assessment pipeline. `ios/README.md` records the remaining platform work,
+/// including CoreLocation, protected storage, and speech.
 @Observable
 @MainActor
 final class AppEnvironment {
@@ -17,6 +18,7 @@ final class AppEnvironment {
     let plan: TodayPlan
     let careRecords: InMemoryCareRecordStore
     let companion: CompanionSessionModel
+    let medicineAssessmentRunner: MedicineAssessmentRunner
 
     /// What this build can really do — the app's single capability source.
     ///
@@ -40,11 +42,35 @@ final class AppEnvironment {
 
         let store = InMemoryCareRecordStore(clock: clock)
         careRecords = store
-        companion = CompanionSessionModel(
+        let companion = CompanionSessionModel(
             records: store,
             simulator: simulator,
             plan: plan,
             capabilities: capabilities
+        )
+        self.companion = companion
+
+        let mappingConfiguration: MedicineRecognitionMappingConfiguration
+        do {
+            mappingConfiguration = try MedicineRecognitionMappingConfiguration(
+                minimumConfidence: 0,
+                lowConfidenceHandling: .retainAsEvidence
+            )
+        } catch {
+            preconditionFailure(
+                "Invalid built-in medicine recognition mapping configuration."
+            )
+        }
+        let requester = LocalMedicineAssessmentRequester.demo(clock: clock)
+        medicineAssessmentRunner = MedicineAssessmentRunner(
+            session: companion,
+            recognizer: AppleVisionMedicineTextRecognizer(),
+            mapper: MedicineRecognitionInputMapper(
+                configuration: mappingConfiguration
+            ),
+            requester: requester,
+            confirmer: requester,
+            clock: clock
         )
     }
 
