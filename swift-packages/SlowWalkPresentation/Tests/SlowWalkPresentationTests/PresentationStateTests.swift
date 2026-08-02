@@ -169,9 +169,9 @@ final class PresentationStateTests: XCTestCase {
         XCTAssertTrue(display.requiresMedicineConfirmation)
     }
 
-    // MARK: - Test 12: redRisk 与 mustConfirmMedicine 相互独立
+    // MARK: - Test 12: redRisk 在需要确认时仍保持 red
 
-    func test_redRisk_andMustConfirmMedicine_areIndependentDimensions() async throws {
+    func test_redRisk_isPreservedWhenMedicineConfirmationIsRequired() async throws {
         let payload = try PresentationFixtureLoader.load(
             "medicine-red-risk.json"
         )
@@ -181,13 +181,17 @@ final class PresentationStateTests: XCTestCase {
             payload.response.actionCard.mustConfirmMedicine
         )
 
-        // Even when mustConfirmMedicine is toggled to true, the variant
-        // remains redRisk because the risk level is the deciding factor.
+        // Confirmation is a separate presentation dimension, but the canonical
+        // response requires both confirmation flags to agree.
         let cardWithConfirm = payload.response.actionCard.replacing(
             mustConfirmMedicine: true
         )
+        let resolutionWithConfirm = payload.response.resolution.replacing(
+            requiresUserConfirmation: true
+        )
         let responseWithConfirm = payload.response.replacing(
-            actionCard: cardWithConfirm
+            actionCard: cardWithConfirm,
+            resolution: resolutionWithConfirm
         )
 
         let viewState = try await CoordinatorHarness.viewState(
@@ -217,6 +221,10 @@ final class PresentationStateTests: XCTestCase {
             requiresUserConfirmation: true
         )
         let notFoundResponse = payload.response.replacing(
+            assessment: .some(nil),
+            actionCard: payload.response.actionCard.replacing(
+                mustConfirmMedicine: true
+            ),
             resolution: notFoundResolution
         )
 
@@ -302,6 +310,10 @@ final class PresentationStateTests: XCTestCase {
             requiresUserConfirmation: true
         )
         let response = payload.response.replacing(
+            assessment: .some(nil),
+            actionCard: payload.response.actionCard.replacing(
+                mustConfirmMedicine: true
+            ),
             resolution: insufficientResolution
         )
 
@@ -327,6 +339,10 @@ final class PresentationStateTests: XCTestCase {
             requiresUserConfirmation: true
         )
         let response = payload.response.replacing(
+            assessment: .some(nil),
+            actionCard: payload.response.actionCard.replacing(
+                mustConfirmMedicine: true
+            ),
             resolution: failedResolution
         )
 
