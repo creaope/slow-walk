@@ -1,4 +1,5 @@
 import Foundation
+import SlowWalkClientCore
 
 /// Why a medicine photo could not be read.
 ///
@@ -62,41 +63,6 @@ struct ConfirmedMedicine: Equatable, Hashable {
     let origin: MedicineChoiceOrigin
 }
 
-/// Why a formal medicine assessment could not be produced.
-///
-/// Like `MedicineReadSetback`, a setback never carries a medicine conclusion or
-/// a risk level. It only says why there is no result, so the flow can offer a
-/// way out instead of inventing one.
-enum MedicineAssessmentSetback: Equatable, Hashable, CaseIterable {
-    /// No assessment path is wired up in this build.
-    ///
-    /// This is the honest state of Phase 0: `MedicinePipeline` exists in
-    /// `SlowWalkCore`, but no adapter in this target reaches it. Removing this
-    /// case is part of landing `LocalMedicineAssessmentRequester`, not part of
-    /// hiding it.
-    case notWiredUpYet
-}
-
-/// How far the formal medicine assessment has got.
-///
-/// The point of this type is that there is no value meaning "assessed" yet.
-/// A successful assessment carries a result, and that result is owned by
-/// `SlowWalkCore` and presented by `SlowWalkPresentation`; until an adapter
-/// produces one, the only truthful values are "not started" and "could not".
-enum MedicineAssessmentProgress: Equatable, Hashable {
-    /// A formal assessment is owed but has not produced anything yet.
-    case notStarted
-    /// The assessment could not be carried out. Recovery is offered.
-    case couldNotAssess(MedicineAssessmentSetback)
-
-    var setback: MedicineAssessmentSetback? {
-        switch self {
-        case .notStarted: nil
-        case let .couldNotAssess(setback): setback
-        }
-    }
-}
-
 /// The step between confirming a medicine and being shown anything about it.
 ///
 /// This state is the safety gate. It exists so a confirmed *name* can never be
@@ -104,20 +70,43 @@ enum MedicineAssessmentProgress: Equatable, Hashable {
 /// this", which is not an answer to "is it safe to take". Nothing downstream —
 /// no action card, no care-action record, no departure — may happen from here
 /// without a real assessment result.
-struct MedicineAssessmentGate: Equatable, Hashable {
+///
+/// The gate stores the latest canonical `MedicineAssessmentStateUpdate` accepted
+/// by the reducer. `latestUpdate` is `nil` when no update has been received yet,
+/// which is semantically `.idle`.
+///
+/// `Equatable` only — no `Hashable` usage exists in this build.
+struct MedicineAssessmentGate: Equatable {
     let confirmed: ConfirmedMedicine
     /// The prompt the confirmation came from, so a different candidate can be
     /// chosen without re-reading the box.
     let prompt: MedicineConfirmationPrompt
-    let progress: MedicineAssessmentProgress
+    /// The latest canonical state update accepted. `nil` means no update has
+    /// been received — equivalent to `.idle`.
+    let latestUpdate: MedicineAssessmentStateUpdate?
+
+    /// The current canonical assessment state, defaulting to `.idle`.
+    var assessmentState: MedicineAssessmentViewState {
+        latestUpdate?.state ?? .idle
+    }
 
     /// True once the person is being offered a way out rather than a wait.
     var isAwaitingRecovery: Bool {
-        progress.setback != nil
+        switch assessmentState {
+        case .failed, .cancelled:
+            true
+        case .idle, .recognizing, .requiresMedicineConfirmation,
+             .assessing, .result:
+            false
+        }
     }
 }
 
 /// How a companion session finished.
+///
+/// `.completedMedicineCheck` is deliberately not yet defined. It gates the
+/// medicine-only completion path — a future phase will add it together with
+/// the transition that enters it, once the result-display callback exists.
 enum CompanionCompletion: Equatable, Hashable {
     case arrivedSafely
     case endedEarly
@@ -135,13 +124,16 @@ enum CompanionCompletion: Equatable, Hashable {
 /// strength of a confirmed name alone. It is replaced by
 /// `awaitingMedicineAssessment`. When a real assessment result exists, the
 /// showing state returns carrying that result — never just a name.
-enum CompanionFlowState: Equatable, Hashable {
+///
+/// `Equatable` only — no `Hashable` usage exists in this build.
+enum CompanionFlowState: Equatable {
     case notStarted
     case preDepartureCheck
     case scanningMedicine(MedicineReadAttempt)
     case awaitingMedicineConfirmation(MedicineConfirmationPrompt)
     /// A medicine is confirmed and a formal assessment is owed. Nothing is
     /// shown about the medicine and the session cannot move on from here.
+    /// The gate carries the latest canonical `MedicineAssessmentStateUpdate`.
     case awaitingMedicineAssessment(MedicineAssessmentGate)
     case travelling
     case approachingStop
@@ -164,7 +156,9 @@ enum CompanionFlowState: Equatable, Hashable {
 }
 
 /// Every input that can move a companion session forward.
-enum CompanionFlowEvent: Equatable, Hashable {
+///
+/// `Equatable` only — no `Hashable` usage exists in this build.
+enum CompanionFlowEvent: Equatable {
     case startCompanion
     case beginMedicineRead
     case medicineReadDidNotSucceed(MedicineReadSetback)
@@ -174,13 +168,13 @@ enum CompanionFlowEvent: Equatable, Hashable {
     /// Raised when none of the offered candidates match the box in hand.
     case retakeMedicinePhoto
     case confirmMedicine(MedicineCandidate)
-    /// Raised when a formal assessment could not be produced.
+    /// A canonical state update from the medicine assessment coordinator.
     ///
-    /// There is deliberately no `medicineAssessmentSucceeded` counterpart yet.
-    /// Adding one means adding the result type it carries, which is the next
-    /// stage's work; leaving it out is what keeps this build from claiming an
-    /// assessment it never made.
-    case medicineAssessmentDidNotSucceed(MedicineAssessmentSetback)
+    /// The update carries a monotonic `sequenceNumber` so the reducer can
+    /// reject stale or duplicate deliveries. All seven canonical cases are
+    /// accepted and stored; only `.result` earns departure qualification,
+    /// and even then the session stays at the gate in C1.
+    case medicineAssessmentStateDidUpdate(MedicineAssessmentStateUpdate)
     /// Goes back to the candidate list to pick a different medicine.
     case reconsiderMedicineChoice
     case approachStop

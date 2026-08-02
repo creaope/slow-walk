@@ -1,4 +1,5 @@
 import Testing
+import SlowWalkClientCore
 @testable import SlowWalkApp
 
 /// Tests for the capability status model.
@@ -225,7 +226,10 @@ struct CapabilityStatusTests {
     /// and requiring the sentence to change.
     @Test func gateWordingFollowsTheCatalogItIsGiven() {
         let gate = MedicineAssessmentGateTests.makeGate(
-            progress: .couldNotAssess(.notWiredUpYet)
+            latestUpdate: MedicineAssessmentStateUpdate(
+                sequenceNumber: 1,
+                state: .failed(MedicineAssessmentGateTests.clientFailure)
+            )
         )
         let state = CompanionFlowState.awaitingMedicineAssessment(gate)
 

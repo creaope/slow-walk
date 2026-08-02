@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import SlowWalkClientCore
 @testable import SlowWalkApp
 
 /// Tests that the capability table is a *single* source of truth.
@@ -37,9 +38,19 @@ struct CapabilitySourceOfTruthTests {
 
         // ...and it acted on it: the missing capability was reported, which is
         // the behaviour half of "behaviour and wording agree".
-        #expect(session.assessmentGate?.progress == .couldNotAssess(.notWiredUpYet))
+        // C1: no setback is fabricated; the gate holds `.idle` until a
+        // canonical state update arrives.
+        #expect(session.assessmentGate?.assessmentState == .idle)
 
-        // The sentence the view shows came from that table, not from `.phase0`.
+        // C1: the `.idle` gate copy is catalog-independent. Apply a `.failed`
+        // update so the copy reads the catalog's detail line, then verify the
+        // marker appears — proving the copy reads the injected catalog.
+        session.applyAssessmentStateUpdate(
+            MedicineAssessmentStateUpdate(
+                sequenceNumber: 1,
+                state: .failed(MedicineAssessmentGateTests.clientFailure)
+            )
+        )
         #expect(session.situation.contains(TestCapabilityCatalogs.marker))
         #expect(session.situation.contains("下一阶段") == false)
     }
@@ -57,6 +68,13 @@ struct CapabilitySourceOfTruthTests {
         let status = session.capabilities.status(of: .medicineRiskAssessment)
         #expect(status.detail?.contains(TestCapabilityCatalogs.marker) == true)
 
+        // C1: apply `.failed` so the copy reads the catalog's detail line.
+        session.applyAssessmentStateUpdate(
+            MedicineAssessmentStateUpdate(
+                sequenceNumber: 1,
+                state: .failed(MedicineAssessmentGateTests.clientFailure)
+            )
+        )
         // The badge and the surrounding sentence agree, because both derive from
         // the one table the session holds.
         #expect(session.situation.contains(TestCapabilityCatalogs.marker))
@@ -69,6 +87,14 @@ struct CapabilitySourceOfTruthTests {
     @Test func todaySummaryUsesTheSameTableAsTheSession() async {
         let session = await Self.sessionAtGate(
             capabilities: TestCapabilityCatalogs.allMarked
+        )
+
+        // C1: apply `.failed` so the copy reads the catalog's detail line.
+        session.applyAssessmentStateUpdate(
+            MedicineAssessmentStateUpdate(
+                sequenceNumber: 1,
+                state: .failed(MedicineAssessmentGateTests.clientFailure)
+            )
         )
 
         let summary = TodayStatusSummary(
@@ -139,15 +165,18 @@ struct CapabilitySourceOfTruthTests {
         #expect(status.summaryLine.contains(notWiredUp) == false)
         #expect(status.detail?.contains("尚未接入") == false)
 
-        // While it waits, the gate claims nothing either way.
+        // C1: the `.idle` gate says the assessment hasn't started yet.
         #expect(session.situation.contains("尚未接入") == false)
-        #expect(session.situation.contains("正在等待正式的用药风险评估"))
+        #expect(session.situation.contains("尚未开始正式评估"))
 
         // And the sentence for a setback carries the new explanation, not the
         // "will be wired up later" one.
         let couldNotAssess = CompanionFlowState.awaitingMedicineAssessment(
             MedicineAssessmentGateTests.makeGate(
-                progress: .couldNotAssess(.notWiredUpYet)
+                latestUpdate: MedicineAssessmentStateUpdate(
+                    sequenceNumber: 1,
+                    state: .failed(MedicineAssessmentGateTests.clientFailure)
+                )
             )
         )
         let wording = CompanionCopy.situation(
@@ -169,8 +198,9 @@ struct CapabilitySourceOfTruthTests {
         let status = session.capabilities.status(of: .medicineRiskAssessment)
         #expect(status.availability == .unavailable)
         #expect(status.shortLabel == "尚未接入")
-        #expect(session.situation.contains("尚未完成风险评估"))
-        #expect(session.situation.contains("下一阶段"))
+        // C1: the `.idle` gate says assessment hasn't started yet.
+        // This still conveys the unavailability truthfully.
+        #expect(session.situation.contains("尚未开始正式评估"))
         #expect(session.situation.contains("设备内评估已接入") == false)
     }
 
@@ -199,7 +229,7 @@ struct CapabilitySourceOfTruthTests {
             }
         }
         #expect(claimsSomething == false)
-        #expect(session.assessmentGate?.progress == .notStarted)
+        #expect(session.assessmentGate?.assessmentState == .idle)
     }
 
     // MARK: - No screen keeps its own table
