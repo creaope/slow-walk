@@ -340,7 +340,11 @@ enum PermitExitPath: CaseIterable, Equatable, Error, Sendable {
     case registrationRejected
 }
 
-@Suite("Apple Vision text recognizer", .timeLimit(.minutes(1)))
+@Suite(
+    "Apple Vision text recognizer",
+    .serialized,
+    .timeLimit(.minutes(1))
+)
 struct AppleVisionMedicineTextRecognizerTests {
     private func makeInput(data: Data = Data([1])) -> OCRImageInput {
         OCRImageInput(
