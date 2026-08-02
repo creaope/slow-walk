@@ -48,8 +48,8 @@ enum CompanionCopy {
             attempt.isAwaitingRecovery ? "需要再试一次" : "正在模拟识别"
         case .awaitingMedicineConfirmation:
             "请确认药名"
-        case .awaitingMedicineAssessment:
-            "尚未完成风险评估"
+        case let .awaitingMedicineAssessment(gate):
+            assessmentGateHeading(gate)
         case .travelling:
             "出行途中"
         case .approachingStop:
@@ -59,6 +59,29 @@ enum CompanionCopy {
             case .arrivedSafely: "已安全结束"
             case .endedEarly: "已提前结束"
             }
+        }
+    }
+
+    /// A single heading for the assessment gate, shared by the step summary,
+    /// the visible pending panel, and its VoiceOver description.
+    ///
+    /// The switch is exhaustive over the canonical state and deliberately
+    /// describes only lifecycle progress. Risk, ActionCard content, and other
+    /// medical meaning remain owned by the canonical result presentation.
+    static func assessmentGateHeading(
+        _ gate: MedicineAssessmentGate
+    ) -> String {
+        switch gate.assessmentState {
+        case .idle, .recognizing, .assessing:
+            "尚未完成风险评估"
+        case .requiresMedicineConfirmation:
+            "需要进一步确认药名"
+        case .result:
+            "评估结果已生成，等待展示"
+        case .failed:
+            "评估未能完成"
+        case .cancelled:
+            "评估已取消"
         }
     }
 

@@ -219,6 +219,48 @@ struct MedicineAssessmentGateTests {
         #expect(session.assessmentGate?.assessmentState == .result(Self.presentation))
     }
 
+    /// A generated canonical result is waiting for presentation; it is not an
+    /// unfinished assessment and it has not yet been displayed.
+    @Test func resultGateCopySaysGeneratedAndWaitingForDisplay() async {
+        let session = await Self.sessionAtGate()
+        session.applyAssessmentStateUpdate(
+            Self.makeResultUpdate(sequenceNumber: 1)
+        )
+
+        guard let gate = session.assessmentGate else {
+            Issue.record("expected assessment gate after result update")
+            return
+        }
+        let heading = CompanionCopy.assessmentGateHeading(gate)
+        #expect(heading == "评估结果已生成，等待展示")
+        #expect(session.stepLabel == heading)
+        #expect(session.stepLabel.contains("尚未完成") == false)
+        #expect(session.situation.contains("正式评估结果已生成，等待展示"))
+    }
+
+    /// Every canonical lifecycle state receives a deliberate gate heading.
+    /// The panel renders this same production helper directly rather than
+    /// maintaining a second state-to-copy mapping.
+    @Test func assessmentGateHeadingMatchesCanonicalState() {
+        for update in Self.everyGateUpdate {
+            let gate = Self.makeGate(latestUpdate: update)
+            let heading = CompanionCopy.assessmentGateHeading(gate)
+
+            switch gate.assessmentState {
+            case .idle, .recognizing, .assessing:
+                #expect(heading == "尚未完成风险评估")
+            case .requiresMedicineConfirmation:
+                #expect(heading == "需要进一步确认药名")
+            case .result:
+                #expect(heading == "评估结果已生成，等待展示")
+            case .failed:
+                #expect(heading == "评估未能完成")
+            case .cancelled:
+                #expect(heading == "评估已取消")
+            }
+        }
+    }
+
     /// The gate's wording states that no assessment was made, and offers no
     /// medicine conclusion.
     ///
