@@ -80,15 +80,21 @@ struct StaleReadAtAssessmentGateTests {
         }
         #expect(resultRecords.isEmpty)
 
-        // Exactly the legitimate records, in order: the read that started and
-        // the confirmation. Nothing from the stale read's resolution, no
-        // care action, and no fabricated assessment setback (C1).
+        // Candidate selection is not canonical identity, so only the session
+        // and abandoned read start have been recorded at this point.
         let outingTitle = TodayPlan.demo.outing?.title ?? "今日用药"
         #expect(store.kinds == [
             .dayPlanItemStarted(title: outingTitle),
             .medicineReadStarted(attemptNumber: 1),
+        ])
+
+        session.applyAssessmentStateUpdate(
+            MedicineAssessmentGateTests.makeResultUpdate(sequenceNumber: 1)
+        )
+        #expect(store.kinds.suffix(1) == [
             .medicineConfirmed(
-                medicineName: MedicineCandidate.demoFrequentlyUsed[0].displayName,
+                medicineName: MedicineAssessmentGateTests
+                    .canonicalCandidate.medicine.canonicalName,
                 origin: .chosenFromFrequentList
             ),
         ])
@@ -215,14 +221,10 @@ struct StaleReadAtAssessmentGateTests {
         #expect(session.assessmentGate == nil)
     }
 
-    // MARK: - 7. Repeated confirmation writes one record
+    // MARK: - 7. Candidate confirmation waits for canonical identity
 
-    /// Confirming the same candidate twice writes one confirmation record.
-    ///
-    /// The second confirmation is refused because the session has left the
-    /// confirmation state, so no side effect may follow it. C1 writes no
-    /// assessment setback record.
-    @Test func repeatedConfirmationWritesOneCareRecord() async {
+    /// Repeated candidate input writes nothing; the canonical result writes once.
+    @Test func repeatedConfirmationWritesOnlyCanonicalResult() async {
         let delay = ControllableReadDelay()
         let store = RecordingCareRecordStore()
         let session = CompanionSessionModel(
@@ -250,7 +252,24 @@ struct StaleReadAtAssessmentGateTests {
             if case .medicineConfirmed = kind { return true }
             return false
         }
-        #expect(confirmed.count == 1)
+        #expect(confirmed.isEmpty)
+
+        let update = MedicineAssessmentGateTests.makeResultUpdate(
+            sequenceNumber: 1
+        )
+        session.applyAssessmentStateUpdate(update)
+        session.applyAssessmentStateUpdate(update)
+        let canonicalRecords = store.kinds.filter { kind in
+            if case .medicineConfirmed = kind { return true }
+            return false
+        }
+        #expect(canonicalRecords == [
+            .medicineConfirmed(
+                medicineName: MedicineAssessmentGateTests
+                    .canonicalCandidate.medicine.canonicalName,
+                origin: .readFromPhoto
+            ),
+        ])
 
         // C1: no assessment setback record is fabricated.
         let notAssessed = store.kinds.filter { kind in
@@ -260,12 +279,8 @@ struct StaleReadAtAssessmentGateTests {
         #expect(notAssessed.count == 0)
     }
 
-    /// Confirming again after reconsidering writes a second, legitimate
-    /// confirmation — the deduplication must not swallow a real new decision.
-    ///
-    /// Without this, "no duplicate records" could be satisfied by a model that
-    /// simply never records twice, which would lose a genuine re-confirmation.
-    @Test func confirmingAfterReconsideringRecordsTheNewChoice() async {
+    /// Reconsidered candidates remain noncanonical until the current result.
+    @Test func reconsideredCandidateRecordsOnlyCanonicalResult() async {
         let delay = ControllableReadDelay()
         let store = RecordingCareRecordStore()
         let session = CompanionSessionModel(
@@ -288,13 +303,24 @@ struct StaleReadAtAssessmentGateTests {
         session.reconsiderMedicineChoice()
         session.confirmMedicine(MedicineCandidate.demoCandidates[1])
 
-        let confirmedNames: [String] = store.kinds.compactMap { kind in
-            if case let .medicineConfirmed(name, _) = kind { return name }
-            return nil
+        #expect(store.kinds.contains { kind in
+            if case .medicineConfirmed = kind { return true }
+            return false
+        } == false)
+
+        session.applyAssessmentStateUpdate(
+            MedicineAssessmentGateTests.makeResultUpdate(sequenceNumber: 1)
+        )
+        let canonicalRecords = store.kinds.filter { kind in
+            if case .medicineConfirmed = kind { return true }
+            return false
         }
-        #expect(confirmedNames == [
-            MedicineCandidate.demoCandidates[0].displayName,
-            MedicineCandidate.demoCandidates[1].displayName,
+        #expect(canonicalRecords == [
+            .medicineConfirmed(
+                medicineName: MedicineAssessmentGateTests
+                    .canonicalCandidate.medicine.canonicalName,
+                origin: .readFromPhoto
+            ),
         ])
         // Still no care action, for either confirmation.
         let actionShown = store.kinds.contains { kind in

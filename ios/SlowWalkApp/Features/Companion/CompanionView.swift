@@ -12,8 +12,10 @@ import SwiftUI
 /// follow underneath.
 struct CompanionView: View {
     @Environment(AppEnvironment.self) private var environment
-    @State private var isMedicineCapturePresented = false
+    @State private var medicineCapturePresentation =
+        MedicineCapturePresentationLifecycle()
     @State private var medicineCaptureViewModel: MedicineCaptureViewModel?
+    @State private var medicineCaptureViewModelToken: UUID?
     private let sessionOverride: CompanionSessionModel?
 
     init(session: CompanionSessionModel? = nil) {
@@ -27,20 +29,27 @@ struct CompanionView: View {
     var body: some View {
         rootContent
             .fullScreenCover(
-                isPresented: $isMedicineCapturePresented,
-                onDismiss: { medicineCaptureViewModel = nil }
+                isPresented: isMedicineCapturePresented,
+                onDismiss: { completeMedicineCaptureDismissal() }
             ) {
-                if let medicineCaptureViewModel {
+                if let identity = medicineCapturePresentation.current,
+                   identity.viewModelToken == medicineCaptureViewModelToken,
+                   let medicineCaptureViewModel
+                {
                     MedicineCaptureView(viewModel: medicineCaptureViewModel)
+                        .onDisappear {
+                            medicineCapturePresentation.requestDismissal(
+                                for: identity
+                            )
+                        }
                 }
             }
             .onChange(of: session.currentAssessmentGateLease) {
                 oldLease, newLease in
-                guard isMedicineCapturePresented,
-                      oldLease != nil,
-                      oldLease != newLease
-                else { return }
-                isMedicineCapturePresented = false
+                medicineCapturePresentation.gateLeaseDidChange(
+                    from: oldLease,
+                    to: newLease
+                )
             }
     }
 
@@ -115,7 +124,9 @@ struct CompanionView: View {
             )
             .id(requestID)
             .onAppear {
-                _ = session.medicineAssessmentResultDidDisplay()
+                _ = session.medicineAssessmentResultDidDisplay(
+                    requestID: requestID
+                )
             }
 
         case .nonResult:
@@ -222,6 +233,79 @@ struct CompanionView: View {
             } else {
                 self = .nonResult
             }
+        }
+    }
+
+    struct MedicineCapturePresentationIdentity: Equatable {
+        let token: UUID
+        let gateLease: MedicineAssessmentGateLease
+        let viewModelToken: UUID
+    }
+
+    struct MedicineCapturePresentationLifecycle {
+        private(set) var current: MedicineCapturePresentationIdentity?
+        private(set) var isPresented = false
+        private var pendingDismissals: [MedicineCapturePresentationIdentity] = []
+
+        mutating func present(
+            _ identity: MedicineCapturePresentationIdentity
+        ) {
+            current = identity
+            isPresented = true
+        }
+
+        @discardableResult
+        mutating func assessmentSubmissionAccepted(
+            for identity: MedicineCapturePresentationIdentity,
+            currentGateLease: MedicineAssessmentGateLease?,
+            currentViewModelToken: UUID?
+        ) -> Bool {
+            guard isPresented,
+                  current == identity,
+                  currentGateLease == identity.gateLease,
+                  currentViewModelToken == identity.viewModelToken
+            else { return false }
+
+            requestDismissal(for: identity)
+            return true
+        }
+
+        mutating func gateLeaseDidChange(
+            from oldLease: MedicineAssessmentGateLease?,
+            to newLease: MedicineAssessmentGateLease?
+        ) {
+            guard oldLease != newLease,
+                  let oldLease,
+                  let current,
+                  current.gateLease == oldLease
+            else { return }
+            requestDismissal(for: current)
+        }
+
+        mutating func requestCurrentDismissal() {
+            guard let current else { return }
+            requestDismissal(for: current)
+        }
+
+        mutating func requestDismissal(
+            for identity: MedicineCapturePresentationIdentity
+        ) {
+            guard current == identity else { return }
+            if !pendingDismissals.contains(identity) {
+                pendingDismissals.append(identity)
+            }
+            isPresented = false
+        }
+
+        mutating func completeNextDismissal()
+            -> MedicineCapturePresentationIdentity? {
+            guard !pendingDismissals.isEmpty else { return nil }
+            let dismissed = pendingDismissals.removeFirst()
+            if current == dismissed {
+                current = nil
+                isPresented = false
+            }
+            return dismissed
         }
     }
 
@@ -476,14 +560,44 @@ struct CompanionView: View {
 
     private func presentMedicineCapture() {
         guard case .awaitingMedicineAssessment = session.state,
-              session.currentAssessmentGateLease != nil,
-              !isMedicineCapturePresented
+              let gateLease = session.currentAssessmentGateLease,
+              !medicineCapturePresentation.isPresented
         else { return }
 
-        medicineCaptureViewModel = environment.makeMedicineCaptureViewModel {
-            isMedicineCapturePresented = false
+        let identity = MedicineCapturePresentationIdentity(
+            token: UUID(),
+            gateLease: gateLease,
+            viewModelToken: UUID()
+        )
+        let viewModel = environment.makeMedicineCaptureViewModel {
+            _ = medicineCapturePresentation.assessmentSubmissionAccepted(
+                for: identity,
+                currentGateLease: session.currentAssessmentGateLease,
+                currentViewModelToken: medicineCaptureViewModelToken
+            )
         }
-        isMedicineCapturePresented = true
+        medicineCaptureViewModel = viewModel
+        medicineCaptureViewModelToken = identity.viewModelToken
+        medicineCapturePresentation.present(identity)
+    }
+
+    private var isMedicineCapturePresented: Binding<Bool> {
+        Binding(
+            get: { medicineCapturePresentation.isPresented },
+            set: { shouldPresent in
+                guard !shouldPresent else { return }
+                medicineCapturePresentation.requestCurrentDismissal()
+            }
+        )
+    }
+
+    private func completeMedicineCaptureDismissal() {
+        guard let dismissed =
+                medicineCapturePresentation.completeNextDismissal(),
+              medicineCaptureViewModelToken == dismissed.viewModelToken
+        else { return }
+        medicineCaptureViewModel = nil
+        medicineCaptureViewModelToken = nil
     }
 
     private var completedControls: some View {

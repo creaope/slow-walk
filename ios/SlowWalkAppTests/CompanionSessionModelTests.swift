@@ -199,7 +199,7 @@ struct CompanionSessionModelTests {
 
     // MARK: - Repeated events do not double-write
 
-    @Test func repeatedConfirmDoesNotDoubleWrite() async {
+    @Test func repeatedCandidateConfirmationWaitsForCanonicalResult() async {
         let spy = SpyScanSimulator(
             scriptedOutcome: .findsCandidates(MedicineCandidate.demoCandidates)
         )
@@ -225,7 +225,24 @@ struct CompanionSessionModelTests {
             return false
         }.count
 
-        #expect(confirmedCount == 1)
+        #expect(confirmedCount == 0)
+
+        let update = MedicineAssessmentGateTests.makeResultUpdate(
+            sequenceNumber: 1
+        )
+        session.applyAssessmentStateUpdate(update)
+        session.applyAssessmentStateUpdate(update)
+        let confirmed = store.kinds.filter { kind in
+            if case .medicineConfirmed = kind { return true }
+            return false
+        }
+        #expect(confirmed == [
+            .medicineConfirmed(
+                medicineName: MedicineAssessmentGateTests
+                    .canonicalCandidate.medicine.canonicalName,
+                origin: .readFromPhoto
+            ),
+        ])
 
         // No care-action record is written at all: confirming a name is not an
         // assessment, so nothing may claim a care action was shown.

@@ -196,8 +196,12 @@ struct MedicineAssessmentGateTests {
             )
         )
 
-        #expect(session.medicineAssessmentResultDidDisplay())
-        #expect(session.medicineAssessmentResultDidDisplay() == false)
+        #expect(session.medicineAssessmentResultDidDisplay(
+            requestID: result.response.requestID
+        ))
+        #expect(session.medicineAssessmentResultDidDisplay(
+            requestID: result.response.requestID
+        ) == false)
         #expect(Self.careActionShownCount(in: store) == 1)
         #expect(
             store.kinds.contains(
@@ -207,6 +211,207 @@ struct MedicineAssessmentGateTests {
             )
         )
         #expect(session.canDepart)
+    }
+
+    @Test func frequentListRecordsOnlyCanonicalResultIdentityOnce() {
+        let (session, store) = Self.captureFirstSessionAndStore()
+        session.chooseFromFrequentList()
+        let candidate = MedicineCandidate.demoFrequentlyUsed[0]
+        session.confirmMedicine(candidate)
+
+        #expect(
+            candidate.displayName
+                != Self.canonicalCandidate.medicine.canonicalName
+        )
+        #expect(Self.medicineConfirmedCount(in: store) == 0)
+
+        let emptyNameCandidate = Self.makeCanonicalCandidate(
+            canonicalName: " \n"
+        )
+        let emptyNameResolution = MedicineResolution(
+            status: .resolved,
+            candidates: [emptyNameCandidate],
+            selectedMedicine: emptyNameCandidate.medicine,
+            evidence: Self.presentation.response.resolution.evidence,
+            requiresUserConfirmation: false
+        )
+        session.applyAssessmentStateUpdate(
+            MedicineAssessmentStateUpdate(
+                sequenceNumber: 1,
+                state: .result(
+                    MedicineAssessmentPresentation(
+                        response: Self.response(
+                            resolution: emptyNameResolution
+                        )
+                    )
+                )
+            )
+        )
+        #expect(Self.medicineConfirmedCount(in: store) == 0)
+
+        let update = Self.makeResultUpdate(sequenceNumber: 2)
+        session.applyAssessmentStateUpdate(update)
+        session.applyAssessmentStateUpdate(update)
+        session.applyAssessmentStateUpdate(
+            Self.makeResultUpdate(sequenceNumber: 3)
+        )
+
+        #expect(Self.medicineConfirmedCount(in: store) == 1)
+        #expect(store.kinds.contains(
+            .medicineConfirmed(
+                medicineName: Self.canonicalCandidate.medicine.canonicalName,
+                origin: .chosenFromFrequentList
+            )
+        ))
+
+        _ = session.medicineAssessmentResultDidDisplay(
+            requestID: Self.presentation.response.requestID
+        )
+        #expect(Self.medicineConfirmedCount(in: store) == 1)
+    }
+
+    @Test func replacedGateRejectsOldResultAndRecordsNewRequestOnce() throws {
+        let (session, store) = Self.captureFirstSessionAndStore()
+        let oldLease = try #require(session.currentAssessmentGateLease)
+        let oldUpdate = Self.makeResultUpdate(sequenceNumber: 1)
+
+        session.chooseFromFrequentList()
+        session.confirmMedicine(MedicineCandidate.demoFrequentlyUsed[0])
+        let newLease = try #require(session.currentAssessmentGateLease)
+        let newRequestID = UUID(
+            uuidString: "00000000-0000-0000-0000-000000000006"
+        )!
+        let newUpdate = MedicineAssessmentStateUpdate(
+            sequenceNumber: 1,
+            state: .result(Self.presentation(requestID: newRequestID))
+        )
+
+        session.applyAssessmentStateUpdate(oldUpdate, forGateLease: oldLease)
+        #expect(Self.medicineConfirmedCount(in: store) == 0)
+
+        session.applyAssessmentStateUpdate(newUpdate, forGateLease: newLease)
+        session.applyAssessmentStateUpdate(newUpdate, forGateLease: newLease)
+        #expect(Self.medicineConfirmedCount(in: store) == 1)
+        #expect(store.kinds.contains(
+            .medicineConfirmed(
+                medicineName: Self.canonicalCandidate.medicine.canonicalName,
+                origin: .chosenFromFrequentList
+            )
+        ))
+    }
+
+    @Test func staleDisplayCallbackCannotAcknowledgeReplacementResult() {
+        let requestA = Self.presentation.response.requestID
+        let requestB = UUID(
+            uuidString: "00000000-0000-0000-0000-000000000005"
+        )!
+        let medicineOnlyPlan = TodayPlan(
+            preferredName: "王阿姨",
+            medicines: TodayPlan.demo.medicines,
+            outing: nil
+        )
+
+        for plan in [TodayPlan.demo, medicineOnlyPlan] {
+            let (session, store) = Self.captureFirstSessionAndStore(plan: plan)
+            session.applyAssessmentStateUpdate(
+                Self.makeResultUpdate(sequenceNumber: 1)
+            )
+            session.applyAssessmentStateUpdate(
+                MedicineAssessmentStateUpdate(
+                    sequenceNumber: 2,
+                    state: .result(Self.presentation(requestID: requestB))
+                )
+            )
+
+            #expect(session.medicineAssessmentResultDidDisplay(
+                requestID: requestA
+            ) == false)
+            #expect(Self.careActionShownCount(in: store) == 0)
+            #expect(session.canDepart == false)
+            #expect(session.canCompleteMedicineCheck == false)
+            #expect(session.continueToOuting() == false)
+            #expect(session.completeMedicineCheck() == false)
+
+            #expect(session.medicineAssessmentResultDidDisplay(
+                requestID: requestB
+            ))
+            #expect(session.medicineAssessmentResultDidDisplay(
+                requestID: requestB
+            ) == false)
+            #expect(Self.careActionShownCount(in: store) == 1)
+            #expect(session.canDepart == (plan.outing != nil))
+            #expect(session.canCompleteMedicineCheck == (plan.outing == nil))
+        }
+    }
+
+    @Test func staleCaptureAcceptedCallbackCannotCloseReopenedCapture()
+        throws
+    {
+        let (session, _) = Self.captureFirstSessionAndStore()
+        let lease = try #require(session.currentAssessmentGateLease)
+        var lifecycle = CompanionView.MedicineCapturePresentationLifecycle()
+        let old = Self.captureIdentity(lease: lease)
+        let current = Self.captureIdentity(lease: lease)
+
+        lifecycle.present(old)
+        lifecycle.requestCurrentDismissal()
+        lifecycle.present(current)
+
+        let staleAccepted = lifecycle.assessmentSubmissionAccepted(
+            for: old,
+            currentGateLease: lease,
+            currentViewModelToken: old.viewModelToken
+        )
+        #expect(staleAccepted == false)
+        let oldDismissal = lifecycle.completeNextDismissal()
+        #expect(oldDismissal == old)
+        #expect(lifecycle.current == current)
+        #expect(lifecycle.isPresented)
+
+        let wrongViewModelAccepted = lifecycle.assessmentSubmissionAccepted(
+            for: current,
+            currentGateLease: lease,
+            currentViewModelToken: old.viewModelToken
+        )
+        #expect(wrongViewModelAccepted == false)
+        let currentAccepted = lifecycle.assessmentSubmissionAccepted(
+            for: current,
+            currentGateLease: lease,
+            currentViewModelToken: current.viewModelToken
+        )
+        #expect(currentAccepted)
+        #expect(lifecycle.isPresented == false)
+        let currentDismissal = lifecycle.completeNextDismissal()
+        #expect(currentDismissal == current)
+        #expect(lifecycle.current == nil)
+    }
+
+    @Test func gateReplacementInvalidatesCapturePresentationIdentity()
+        throws
+    {
+        let (session, _) = Self.captureFirstSessionAndStore()
+        let oldLease = try #require(session.currentAssessmentGateLease)
+        var lifecycle = CompanionView.MedicineCapturePresentationLifecycle()
+        let old = Self.captureIdentity(lease: oldLease)
+        lifecycle.present(old)
+
+        session.chooseFromFrequentList()
+        session.confirmMedicine(MedicineCandidate.demoFrequentlyUsed[0])
+        let newLease = try #require(session.currentAssessmentGateLease)
+        lifecycle.gateLeaseDidChange(from: oldLease, to: newLease)
+        let current = Self.captureIdentity(lease: newLease)
+        lifecycle.present(current)
+
+        let staleAccepted = lifecycle.assessmentSubmissionAccepted(
+            for: old,
+            currentGateLease: newLease,
+            currentViewModelToken: old.viewModelToken
+        )
+        #expect(staleAccepted == false)
+        let oldDismissal = lifecycle.completeNextDismissal()
+        #expect(oldDismissal == old)
+        #expect(lifecycle.current == current)
+        #expect(lifecycle.isPresented)
     }
 
     @Test func medicineCaptureCopyContainsNoASCIIEnglishText() {
@@ -344,8 +549,8 @@ struct MedicineAssessmentGateTests {
 
     // MARK: - 3 & 4. No actionShown record, no formal card
 
-    /// Confirming writes the confirmation record — and never a `careActionShown`.
-    @Test func confirmingWritesNoCareActionShownRecord() async {
+    /// Candidate confirmation writes neither canonical record nor display record.
+    @Test func confirmingWritesNoMedicineOrCareActionRecord() async {
         let (session, store) = await Self.sessionAndStoreAtGate()
 
         let hasActionShown = store.kinds.contains { kind in
@@ -354,18 +559,12 @@ struct MedicineAssessmentGateTests {
         }
         #expect(hasActionShown == false)
 
-        // The timeline records the confirmation but no assessment record
-        // (C1 does not fabricate setbacks).
         let outingTitle = TodayPlan.demo.outing?.title ?? "今日用药"
         #expect(store.kinds == [
             .dayPlanItemStarted(title: outingTitle),
             .medicineReadStarted(attemptNumber: 1),
             .medicineReadFoundCandidates(
                 candidateCount: MedicineCandidate.demoCandidates.count
-            ),
-            .medicineConfirmed(
-                medicineName: MedicineCandidate.demoCandidates[0].displayName,
-                origin: .readFromPhoto
             ),
         ])
         #expect(session.assessmentGate != nil)
@@ -491,7 +690,9 @@ struct MedicineAssessmentGateTests {
             let (session, store) = await Self.sessionAndStoreAtGate(
                 latestUpdate: Self.makeResultUpdate(sequenceNumber: 1)
             )
-            #expect(session.medicineAssessmentResultDidDisplay())
+            #expect(session.medicineAssessmentResultDidDisplay(
+                requestID: Self.presentation.response.requestID
+            ))
 
             session.applyAssessmentStateUpdate(
                 MedicineAssessmentStateUpdate(
@@ -502,7 +703,9 @@ struct MedicineAssessmentGateTests {
 
             #expect(session.assessmentGate?.assessmentState == state)
             #expect(session.assessmentGate?.hasDisplayedCurrentResult == false)
-            #expect(session.medicineAssessmentResultDidDisplay() == false)
+            #expect(session.medicineAssessmentResultDidDisplay(
+                requestID: Self.presentation.response.requestID
+            ) == false)
             #expect(session.canDepart == false)
             #expect(session.canCompleteMedicineCheck == false)
             #expect(session.continueToOuting() == false)
@@ -535,7 +738,9 @@ struct MedicineAssessmentGateTests {
         let (session, store) = await Self.sessionAndStoreAtGate(
             latestUpdate: Self.makeResultUpdate(sequenceNumber: 2)
         )
-        #expect(session.medicineAssessmentResultDidDisplay())
+        #expect(session.medicineAssessmentResultDidDisplay(
+            requestID: Self.presentation.response.requestID
+        ))
         #expect(session.canDepart)
 
         session.applyAssessmentStateUpdate(
@@ -550,7 +755,9 @@ struct MedicineAssessmentGateTests {
 
         #expect(session.assessmentGate?.assessmentState == .failed(Self.clientFailure))
         #expect(session.canDepart == false)
-        #expect(session.medicineAssessmentResultDidDisplay() == false)
+        #expect(session.medicineAssessmentResultDidDisplay(
+            requestID: Self.presentation.response.requestID
+        ) == false)
         #expect(session.continueToOuting() == false)
         #expect(session.completeMedicineCheck() == false)
         #expect(store.kinds.filter { kind in
@@ -681,6 +888,16 @@ struct MedicineAssessmentGateTests {
                     ),
                     response: nil
                 )
+            ),
+            Self.unresolvedConfirmationState(
+                status: .ambiguous,
+                reason: .ambiguousMedicine,
+                candidates: [Self.canonicalCandidate]
+            ),
+            Self.unresolvedConfirmationState(
+                status: .notFound,
+                reason: .unresolvedMedicine,
+                candidates: []
             ),
             .assessing(startedAt: Date(timeIntervalSince1970: 0)),
             .result(Self.presentation),
@@ -902,6 +1119,16 @@ struct MedicineAssessmentGateTests {
                     response: nil
                 )
             ),
+            Self.unresolvedConfirmationState(
+                status: .ambiguous,
+                reason: .ambiguousMedicine,
+                candidates: [Self.canonicalCandidate]
+            ),
+            Self.unresolvedConfirmationState(
+                status: .notFound,
+                reason: .unresolvedMedicine,
+                candidates: []
+            ),
             .assessing(startedAt: Date(timeIntervalSince1970: 0)),
             .failed(Self.clientFailure),
             .cancelled,
@@ -917,9 +1144,12 @@ struct MedicineAssessmentGateTests {
             #expect(session.canDepart == false, "\(state) must not allow departure")
             #expect(session.canCompleteMedicineCheck == false,
                     "\(state) must not allow medicine-only completion")
-            #expect(session.medicineAssessmentResultDidDisplay() == false)
+            #expect(session.medicineAssessmentResultDidDisplay(
+                requestID: Self.presentation.response.requestID
+            ) == false)
             #expect(session.continueToOuting() == false)
             #expect(session.completeMedicineCheck() == false)
+            #expect(Self.medicineConfirmedCount(in: store) == 0)
             #expect(store.kinds.contains { kind in
                 if case .careActionShown = kind { return true }
                 return false
@@ -941,7 +1171,9 @@ struct MedicineAssessmentGateTests {
             return false
         } == false)
 
-        #expect(session.medicineAssessmentResultDidDisplay())
+        #expect(session.medicineAssessmentResultDidDisplay(
+            requestID: Self.presentation.response.requestID
+        ))
         #expect(session.assessmentGate?.hasDisplayedCurrentResult == true)
         #expect(
             session.assessmentGate?.displayedResultRequestID
@@ -951,14 +1183,16 @@ struct MedicineAssessmentGateTests {
         #expect(session.canCompleteMedicineCheck == false)
 
         // Repeated render callbacks are harmless and do not duplicate history.
-        #expect(session.medicineAssessmentResultDidDisplay() == false)
+        #expect(session.medicineAssessmentResultDidDisplay(
+            requestID: Self.presentation.response.requestID
+        ) == false)
         let shown = store.kinds.filter { kind in
             if case .careActionShown = kind { return true }
             return false
         }
         #expect(shown == [
             .careActionShown(
-                medicineName: MedicineCandidate.demoCandidates[0].displayName
+                medicineName: Self.canonicalCandidate.medicine.canonicalName
             ),
         ])
 
@@ -990,7 +1224,9 @@ struct MedicineAssessmentGateTests {
         #expect(session.canCompleteMedicineCheck == false)
         #expect(session.completeMedicineCheck() == false)
 
-        #expect(session.medicineAssessmentResultDidDisplay())
+        #expect(session.medicineAssessmentResultDidDisplay(
+            requestID: Self.presentation.response.requestID
+        ))
         #expect(session.canDepart == false)
         #expect(session.canCompleteMedicineCheck)
         #expect(session.continueToOuting() == false)
@@ -1000,7 +1236,7 @@ struct MedicineAssessmentGateTests {
 
         #expect(store.kinds.suffix(2) == [
             .careActionShown(
-                medicineName: MedicineCandidate.demoCandidates[0].displayName
+                medicineName: Self.canonicalCandidate.medicine.canonicalName
             ),
             .companionFinished(.completedMedicineCheck),
         ])
@@ -1176,7 +1412,9 @@ struct MedicineAssessmentGateTests {
         #expect(session.state != .travelling)
 
         // The real-display callback unlocks the explicit transition.
-        #expect(session.medicineAssessmentResultDidDisplay())
+        #expect(session.medicineAssessmentResultDidDisplay(
+            requestID: Self.presentation.response.requestID
+        ))
         #expect(session.canDepart)
         #expect(session.continueToOuting())
         #expect(session.state == .travelling)
@@ -1188,7 +1426,9 @@ struct MedicineAssessmentGateTests {
         let session = await Self.sessionAtGate(
             latestUpdate: Self.makeResultUpdate(sequenceNumber: 1)
         )
-        #expect(session.medicineAssessmentResultDidDisplay())
+        #expect(session.medicineAssessmentResultDidDisplay(
+            requestID: Self.presentation.response.requestID
+        ))
 
         let continuation = CompanionView.AssessmentContinuation(
             canDepart: session.canDepart,
@@ -1218,7 +1458,9 @@ struct MedicineAssessmentGateTests {
             latestUpdate: Self.makeResultUpdate(sequenceNumber: 1),
             plan: plan
         )
-        #expect(session.medicineAssessmentResultDidDisplay())
+        #expect(session.medicineAssessmentResultDidDisplay(
+            requestID: Self.presentation.response.requestID
+        ))
 
         let continuation = CompanionView.AssessmentContinuation(
             canDepart: session.canDepart,
@@ -1350,22 +1592,30 @@ struct MedicineAssessmentGateTests {
         rawConfidence: 0.9
     )
 
-    static let canonicalCandidate = SlowWalkDomain.MedicineCandidate(
-        medicine: SlowWalkDomain.Medicine(
-            id: "canonical-medicine",
-            canonicalName: "规范药品名",
-            aliases: [],
-            activeIngredientIDs: ["canonical-ingredient"],
-            medicineCategory: .other,
-            sourceReferences: [],
-            dosageTextFromSource: nil,
-            contraindicationTags: [],
-            dataVersion: "test-v1"
-        ),
-        matchScore: 1,
-        matchedAlias: nil,
-        matchReasons: [.canonicalExact]
+    static let canonicalCandidate = makeCanonicalCandidate(
+        canonicalName: "规范药品名"
     )
+
+    static func makeCanonicalCandidate(
+        canonicalName: String
+    ) -> SlowWalkDomain.MedicineCandidate {
+        SlowWalkDomain.MedicineCandidate(
+            medicine: SlowWalkDomain.Medicine(
+                id: "canonical-medicine",
+                canonicalName: canonicalName,
+                aliases: [],
+                activeIngredientIDs: ["canonical-ingredient"],
+                medicineCategory: .other,
+                sourceReferences: [],
+                dosageTextFromSource: nil,
+                contraindicationTags: [],
+                dataVersion: "test-v1"
+            ),
+            matchScore: 1,
+            matchedAlias: nil,
+            matchReasons: [.canonicalExact]
+        )
+    }
 
     /// The test `MedicineAssessmentPresentation`, reused across tests.
     static let presentation: MedicineAssessmentPresentation = {
@@ -1393,8 +1643,8 @@ struct MedicineAssessmentGateTests {
         )
         let resolution = MedicineResolution(
             status: .resolved,
-            candidates: [],
-            selectedMedicine: nil,
+            candidates: [canonicalCandidate],
+            selectedMedicine: canonicalCandidate.medicine,
             evidence: evidence,
             requiresUserConfirmation: false
         )
@@ -1453,6 +1703,28 @@ struct MedicineAssessmentGateTests {
             apiVersion: original.apiVersion,
             healthContextValidation: original.healthContextValidation,
             medicineKnowledge: original.medicineKnowledge
+        )
+    }
+
+    static func unresolvedConfirmationState(
+        status: MedicineResolutionStatus,
+        reason: MedicineConfirmationReason,
+        candidates: [SlowWalkDomain.MedicineCandidate]
+    ) -> MedicineAssessmentViewState {
+        .requiresMedicineConfirmation(
+            MedicineConfirmationRequirement(
+                reason: reason,
+                recognitionInput: recognitionInput,
+                response: response(
+                    resolution: MedicineResolution(
+                        status: status,
+                        candidates: candidates,
+                        selectedMedicine: nil,
+                        evidence: presentation.response.resolution.evidence,
+                        requiresUserConfirmation: true
+                    )
+                )
+            )
         )
     }
 
@@ -1531,6 +1803,32 @@ struct MedicineAssessmentGateTests {
             ),
             prompt: prompt,
             latestUpdate: latestUpdate
+        )
+    }
+
+    static func captureFirstSessionAndStore(
+        plan: TodayPlan = .demo
+    ) -> (CompanionSessionModel, RecordingCareRecordStore) {
+        let store = RecordingCareRecordStore()
+        let session = CompanionSessionModel(
+            records: store,
+            simulator: SpyScanSimulator(),
+            plan: plan,
+            readDelay: ControllableReadDelay(),
+            capabilities: .phase0
+        )
+        _ = session.startCompanion()
+        _ = session.beginMedicineCaptureAssessment()
+        return (session, store)
+    }
+
+    static func captureIdentity(
+        lease: MedicineAssessmentGateLease
+    ) -> CompanionView.MedicineCapturePresentationIdentity {
+        CompanionView.MedicineCapturePresentationIdentity(
+            token: UUID(),
+            gateLease: lease,
+            viewModelToken: UUID()
         )
     }
 

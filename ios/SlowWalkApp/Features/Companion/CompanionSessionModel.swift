@@ -197,31 +197,18 @@ final class CompanionSessionModel {
     }
 
     func confirmMedicine(_ candidate: MedicineCandidate) {
-        guard case let .awaitingMedicineConfirmation(prompt) = state,
+        guard case .awaitingMedicineConfirmation = state,
               send(.confirmMedicine(candidate), gateLeaseChange: .replace)
         else {
             return
         }
-        records.append(
-            .medicineConfirmed(
-                medicineName: candidate.displayName,
-                origin: prompt.origin
-            )
-        )
-        // No `careActionShown` record is written here, and none may be. That
-        // record means a care action was actually shown to the person; writing
-        // it on confirmation put a claim in the care timeline that nothing had
-        // produced. The record is written by whatever presents a real
-        // assessment result, which this build has none of.
-        //
+        // Candidate selection carries no canonical medicine identity and writes
+        // no care record. A later validated canonical result owns both the name
+        // and the request ID used for `medicineConfirmed`.
         // Any pending read is abandoned: a confirmation is a decision, and a
         // result that was in flight when it was made must not land afterwards
         // and reopen a step the person has already left.
         invalidatePendingRead()
-        // C1: the gate is entered with `latestUpdate: nil` (semantically
-        // `.idle`). No assessment setback is fabricated, and no
-        // `medicineAssessmentDidNotSucceed` care record is written. The
-        // session simply waits for a canonical state update.
     }
 
     /// Goes back to the candidate list to choose a different medicine.
@@ -251,12 +238,8 @@ final class CompanionSessionModel {
 
     // MARK: - Medicine assessment
 
-    /// Applies a canonical state update delivered by the environment-owned
-    /// medicine assessment runner. The session never owns the coordinator.
-    ///
-    /// The reducer rejects stale or duplicate updates by `sequenceNumber`.
-    /// No care record is written here — `careActionShown` is written only by
-    /// `medicineAssessmentResultDidDisplay()` after a real render.
+    /// Applies a lease-bound canonical update from the environment-owned runner.
+    /// A valid result records canonical identity here; display remains separate.
     func applyAssessmentStateUpdate(_ update: MedicineAssessmentStateUpdate) {
         guard let lease = currentAssessmentGateLease else { return }
         applyAssessmentStateUpdate(update, forGateLease: lease)
@@ -272,32 +255,33 @@ final class CompanionSessionModel {
         guard send(.medicineAssessmentStateDidUpdate(update)) else { return }
         recordCanonicalMedicineConfirmation(
             from: update,
-            captureFirst: gate.preAssessmentSelection == nil
+            origin: gate.preAssessmentSelection?.confirmed.origin
+                ?? .readFromPhoto
         )
     }
 
     /// Acknowledges that the current canonical result was actually displayed.
     ///
-    /// The request ID and medicine name are deliberately derived from the live
-    /// gate so a caller cannot record or unlock a different result. Receiving a
-    /// result alone never calls this method and therefore has no display side
-    /// effect.
+    /// The caller supplies the identity of the result it actually displayed.
+    /// The live gate must still hold that exact canonical request, with a valid
+    /// lease and canonical medicine identity, before either the record or flow
+    /// qualification changes.
     @discardableResult
-    func medicineAssessmentResultDidDisplay() -> Bool {
-        guard let gate = assessmentGate,
-              case let .result(presentation) = gate.assessmentState
+    func medicineAssessmentResultDidDisplay(requestID: UUID) -> Bool {
+        guard currentAssessmentGateLease != nil,
+              let gate = assessmentGate,
+              case let .result(presentation) = gate.assessmentState,
+              presentation.response.requestID == requestID,
+              let medicineName = canonicalMedicineName(from: presentation)
         else { return false }
 
-        let requestID = presentation.response.requestID
         guard send(.medicineAssessmentResultDidDisplay(requestID)) else {
             return false
         }
-        if let medicineName = displayedMedicineName(for: gate) {
-            _ = careActionShownRecorder.recordDisplayed(
-                requestID: requestID,
-                medicineName: medicineName
-            )
-        }
+        _ = careActionShownRecorder.recordDisplayed(
+            requestID: requestID,
+            medicineName: medicineName
+        )
         return true
     }
 
@@ -410,15 +394,10 @@ final class CompanionSessionModel {
 
     private func recordCanonicalMedicineConfirmation(
         from update: MedicineAssessmentStateUpdate,
-        captureFirst: Bool
+        origin: MedicineChoiceOrigin
     ) {
-        guard captureFirst,
-              case let .result(presentation) = update.state,
-              presentation.response.resolution.status == .resolved,
-              let medicine = presentation.response.resolution.selectedMedicine,
-              !medicine.canonicalName.trimmingCharacters(
-                in: .whitespacesAndNewlines
-              ).isEmpty,
+        guard case let .result(presentation) = update.state,
+              let medicineName = canonicalMedicineName(from: presentation),
               recordedCanonicalMedicineRequestIDs.insert(
                 presentation.response.requestID
               ).inserted
@@ -426,27 +405,22 @@ final class CompanionSessionModel {
 
         records.append(
             .medicineConfirmed(
-                medicineName: medicine.canonicalName,
-                origin: .readFromPhoto
+                medicineName: medicineName,
+                origin: origin
             )
         )
     }
 
-    private func displayedMedicineName(
-        for gate: MedicineAssessmentGate
+    private func canonicalMedicineName(
+        from presentation: MedicineAssessmentPresentation
     ) -> String? {
-        guard case let .result(presentation) = gate.assessmentState else {
-            return nil
-        }
-        if presentation.response.resolution.status == .resolved,
-           let medicine = presentation.response.resolution.selectedMedicine,
-           !medicine.canonicalName.trimmingCharacters(
+        guard presentation.response.resolution.status == .resolved,
+              let medicine = presentation.response.resolution.selectedMedicine,
+              !medicine.canonicalName.trimmingCharacters(
             in: .whitespacesAndNewlines
-           ).isEmpty
-        {
-            return medicine.canonicalName
-        }
-        return gate.preAssessmentSelection?.confirmed.candidate.displayName
+              ).isEmpty
+        else { return nil }
+        return medicine.canonicalName
     }
 }
 
