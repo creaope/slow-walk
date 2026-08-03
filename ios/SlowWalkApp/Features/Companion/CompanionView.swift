@@ -1,6 +1,7 @@
 import Foundation
 import SlowWalkAPIContracts
 import SlowWalkClientCore
+import SlowWalkDomain
 import SlowWalkPresentation
 import SwiftUI
 
@@ -110,7 +111,7 @@ struct CompanionView: View {
                 retryAction: {
                     presentMedicineCapture()
                 },
-                confirmAction: assessmentCandidateConfirmationAction
+                confirmAction: nil
             )
             .id(requestID)
             .onAppear {
@@ -123,7 +124,7 @@ struct CompanionView: View {
                 retryAction: {
                     presentMedicineCapture()
                 },
-                confirmAction: assessmentCandidateConfirmationAction
+                confirmAction: nil
             )
         }
     }
@@ -132,6 +133,12 @@ struct CompanionView: View {
         _ gate: MedicineAssessmentGate
     ) -> some View {
         VStack(alignment: .leading, spacing: 12) {
+            if let confirmation = CanonicalCandidateConfirmation(
+                gate.assessmentState
+            ) {
+                canonicalCandidateControls(confirmation.candidates)
+            }
+
             if let continuation = AssessmentContinuation(
                 canDepart: session.canDepart,
                 canCompleteMedicineCheck: session.canCompleteMedicineCheck
@@ -141,8 +148,14 @@ struct CompanionView: View {
                 }
             }
 
-            primaryButton(CompanionCopy.reconsiderMedicineTitle) {
-                session.reconsiderMedicineChoice()
+            if gate.preAssessmentSelection == nil {
+                secondaryButton(CompanionCopy.chooseFromListTitle) {
+                    session.chooseFromFrequentList()
+                }
+            } else {
+                secondaryButton(CompanionCopy.reconsiderMedicineTitle) {
+                    session.reconsiderMedicineChoice()
+                }
             }
 
             if presentationShowsRetry(for: gate.assessmentState) == false {
@@ -168,9 +181,36 @@ struct CompanionView: View {
         return failure.isRecoverable
     }
 
-    /// The canonical confirmation callback has no candidate identity, so this
-    /// flow cannot safely connect it to `session.confirmMedicine(_:)`.
-    var assessmentCandidateConfirmationAction: (() -> Void)? { nil }
+    struct CanonicalCandidateConfirmation: Equatable {
+        let candidates: [SlowWalkDomain.MedicineCandidate]
+
+        init?(_ state: MedicineAssessmentViewState) {
+            guard case let .requiresMedicineConfirmation(requirement) = state,
+                  let response = requirement.response,
+                  !response.resolution.candidates.isEmpty
+            else { return nil }
+
+            switch requirement.reason {
+            case .ambiguousMedicine, .unresolvedMedicine:
+                candidates = response.resolution.candidates
+            case .noRecognizedText, .serverRequiresConfirmation:
+                return nil
+            }
+        }
+    }
+
+    enum MedicineCaptureEntryAction {
+        @MainActor
+        static func perform(
+            on session: CompanionSessionModel,
+            startingSession: Bool = false
+        ) -> Bool {
+            if startingSession, !session.startCompanion() {
+                return false
+            }
+            return session.beginMedicineCaptureAssessment()
+        }
+    }
 
     enum AssessmentPresentationIdentity: Equatable {
         case result(UUID)
@@ -269,12 +309,15 @@ struct CompanionView: View {
         switch session.state {
         case .notStarted:
             primaryButton(CompanionCopy.startCompanionTitle) {
-                session.startCompanion()
+                beginMedicineCapture(startingSession: true)
             }
 
         case .preDepartureCheck:
             primaryButton(CompanionCopy.beginMedicineReadTitle) {
-                session.beginMedicineRead()
+                beginMedicineCapture()
+            }
+            secondaryButton(CompanionCopy.chooseFromListTitle) {
+                session.chooseFromFrequentList()
             }
 
         case let .scanningMedicine(attempt):
@@ -391,6 +434,46 @@ struct CompanionView: View {
         }
     }
 
+    private func canonicalCandidateControls(
+        _ candidates: [SlowWalkDomain.MedicineCandidate]
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            ForEach(candidates, id: \.medicine.id) { candidate in
+                Button {
+                    confirmCanonicalMedicine(candidate)
+                } label: {
+                    Text(candidate.medicine.canonicalName)
+                        .font(.body)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.borderedProminent)
+                .accessibilityLabel(
+                    "确认药名：\(candidate.medicine.canonicalName)"
+                )
+            }
+        }
+    }
+
+    private func confirmCanonicalMedicine(
+        _ candidate: SlowWalkDomain.MedicineCandidate
+    ) {
+        let runner = environment.medicineAssessmentRunner
+        guard let invocation = runner.makeConfirmationInvocation(candidate)
+        else { return }
+        Task { @MainActor in
+            _ = await runner.confirmMedicine(invocation)
+        }
+    }
+
+    private func beginMedicineCapture(startingSession: Bool = false) {
+        guard MedicineCaptureEntryAction.perform(
+            on: session,
+            startingSession: startingSession
+        ) else { return }
+        presentMedicineCapture()
+    }
+
     private func presentMedicineCapture() {
         guard case .awaitingMedicineAssessment = session.state,
               session.currentAssessmentGateLease != nil,
@@ -408,7 +491,7 @@ struct CompanionView: View {
             Text("这次陪伴的记录已经保存在本次运行中。")
                 .font(.body)
             secondaryButton(CompanionCopy.startCompanionTitle) {
-                session.startCompanion()
+                beginMedicineCapture(startingSession: true)
             }
         }
     }

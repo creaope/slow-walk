@@ -22,6 +22,37 @@ struct MedicineAssessmentRunnerTests {
         #expect(await backend.requests.first?.input.recognizedTexts == ["Test Medicine"])
     }
 
+    @Test func captureFirstGateStartsRunnerWithoutMedicineIdentity()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(plans: [.resolved])
+        let recognizer = CountingMedicineRecognizer()
+        let environment = makeProductionEnvironment(
+            backend: backend,
+            recognizer: recognizer
+        )
+        try await enterProductionAssessmentGate(environment.companion)
+
+        #expect(
+            environment.companion.assessmentGate?
+                .preAssessmentSelection == nil
+        )
+        #expect(environment.careRecords.events.contains { event in
+            if case .medicineConfirmed = event.kind { return true }
+            return false
+        } == false)
+
+        let invocation = environment.medicineAssessmentRunner
+            .makeAssessmentInvocation(
+                imageInput: RunnerFixtures.image,
+                userProfile: RunnerFixtures.profile
+            )
+        #expect(await environment.medicineAssessmentRunner.start(invocation))
+        #expect(await recognizer.callCount == 1)
+        #expect(await backend.requests.count == 1)
+        #expect(await waitForGate(environment.companion, state: .result))
+    }
+
     @Test func startRejectsNilAndAnInvocationWithAnInvalidatedGateLease()
         async throws
     {
@@ -784,6 +815,10 @@ struct MedicineAssessmentRunnerTests {
             if case .careActionShown = event.kind { return true }
             return false
         } == false)
+        #expect(environment.careRecords.events.contains { event in
+            if case .medicineConfirmed = event.kind { return true }
+            return false
+        } == false)
 
         await viewModel.dismiss()
         await viewModel.dismiss()
@@ -860,7 +895,7 @@ struct MedicineAssessmentRunnerTests {
             backend: backend, recognizer: recognizer
         )
         try await enterProductionAssessmentGate(environment.companion)
-        environment.companion.reconsiderMedicineChoice()
+        environment.companion.endEarly()
         let closed = MainActorSignal()
         let viewModel = environment.makeMedicineCaptureViewModel {
             closed.signal()
@@ -1050,13 +1085,8 @@ private func enterProductionAssessmentGate(
     _ session: CompanionSessionModel
 ) async throws {
     try #require(session.startCompanion())
-    session.beginMedicineRead()
-    await session.pendingReadTask?.value
-    guard case .awaitingMedicineConfirmation = session.state else {
-        Issue.record("production setup did not reach medicine confirmation")
-        return
-    }
-    session.confirmMedicine(MedicineCandidate.demoCandidates[0])
+    try #require(session.beginMedicineCaptureAssessment())
+    #expect(session.assessmentGate?.preAssessmentSelection == nil)
     try #require(session.currentAssessmentGateLease != nil)
 }
 

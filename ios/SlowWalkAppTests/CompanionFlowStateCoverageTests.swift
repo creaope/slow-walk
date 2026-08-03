@@ -62,6 +62,7 @@ struct CompanionFlowStateCoverageTests {
 
     private enum EventKind: String, CaseIterable {
         case startCompanion
+        case beginMedicineCaptureAssessment
         case beginMedicineRead
         case medicineReadDidNotSucceed
         case retryMedicineRead
@@ -82,6 +83,7 @@ struct CompanionFlowStateCoverageTests {
     private static func kind(of event: CompanionFlowEvent) -> EventKind {
         switch event {
         case .startCompanion: .startCompanion
+        case .beginMedicineCaptureAssessment: .beginMedicineCaptureAssessment
         case .beginMedicineRead: .beginMedicineRead
         case .medicineReadDidNotSucceed: .medicineReadDidNotSucceed
         case .retryMedicineRead: .retryMedicineRead

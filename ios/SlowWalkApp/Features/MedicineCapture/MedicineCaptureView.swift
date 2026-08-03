@@ -3,6 +3,32 @@ import PhotosUI
 import SlowWalkClientCore
 import SwiftUI
 
+enum MedicineCaptureCopy {
+    static let assessmentStartFailed = "无法开始用药检查，请重试。"
+    static let capturePrompt = "请拍摄药品标签"
+    static let requestingCameraPermission = "正在请求相机权限\u{2026}"
+    static let cameraPermissionDenied = "相机权限未开启"
+    static let capturing = "正在拍摄\u{2026}"
+    static let processingImage = "正在处理药品图片\u{2026}"
+    static let noTextFound = "没有识别到文字，请重拍。"
+    static let recognitionFailed = "药品图片识别失败"
+    static let cancelled = "已取消"
+    static let cameraUnavailable = "相机暂时无法使用"
+    static let capture = "拍摄"
+    static let choosePhoto = "从照片中选择"
+    static let cancel = "取消"
+    static let retake = "重拍"
+    static let close = "关闭用药检查"
+    static let recognizedText = "识别到的文字"
+
+    static let allUserVisibleText = [
+        assessmentStartFailed, capturePrompt, requestingCameraPermission,
+        cameraPermissionDenied, capturing, processingImage, noTextFound,
+        recognitionFailed, cancelled, cameraUnavailable, capture, choosePhoto,
+        cancel, retake, close, recognizedText,
+    ]
+}
+
 private final class CameraPreviewView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -72,37 +98,38 @@ struct MedicineCaptureView: View {
         if case .failed = viewModel.assessmentSubmissionStatus {
             statusOverlay(
                 icon: "exclamationmark.triangle.fill",
-                text: "Unable to start the medicine assessment. Try again."
+                text: MedicineCaptureCopy.assessmentStartFailed
             )
         } else {
             switch viewModel.state {
             case .idle:
                 statusOverlay(icon: "camera.fill",
-                              text: "Tap to capture a medicine label")
+                              text: MedicineCaptureCopy.capturePrompt)
             case .requestingPermission:
                 statusOverlay(icon: nil,
-                              text: "Requesting camera access\u{2026}")
+                              text: MedicineCaptureCopy.requestingCameraPermission)
             case .permissionDenied:
                 statusOverlay(icon: "camera.slash.fill",
-                              text: "Camera access denied")
+                              text: MedicineCaptureCopy.cameraPermissionDenied)
             case .ready:           EmptyView()
             case .capturing:
-                statusOverlay(icon: nil, text: "Capturing\u{2026}")
+                statusOverlay(icon: nil, text: MedicineCaptureCopy.capturing)
             case .recognizing:
-                statusOverlay(icon: nil, text: "Processing medicine image\u{2026}")
+                statusOverlay(icon: nil, text: MedicineCaptureCopy.processingImage)
             case .success(let observations):
                 successPanel(observations)
             case .noTextFound:
                 statusOverlay(icon: "text.magnifyingglass",
-                              text: "No text found. Try again.")
+                              text: MedicineCaptureCopy.noTextFound)
             case .recognitionFailed:
                 statusOverlay(icon: "exclamationmark.triangle.fill",
-                              text: "Recognition failed")
+                              text: MedicineCaptureCopy.recognitionFailed)
             case .cancelled:
-                statusOverlay(icon: "xmark.circle.fill", text: "Cancelled")
+                statusOverlay(icon: "xmark.circle.fill",
+                              text: MedicineCaptureCopy.cancelled)
             case .cameraUnavailable:
                 statusOverlay(icon: "camera.fill",
-                              text: "Camera unavailable")
+                              text: MedicineCaptureCopy.cameraUnavailable)
             }
         }
     }
@@ -136,6 +163,7 @@ struct MedicineCaptureView: View {
                     .stroke(Color.white.opacity(0.3), lineWidth: 4)
                     .frame(width: 84, height: 84))
         }
+        .accessibilityLabel(MedicineCaptureCopy.capture)
     }
 
     private var photosPickerButton: some View {
@@ -147,11 +175,13 @@ struct MedicineCaptureView: View {
                 .background(Color.white.opacity(0.15))
                 .clipShape(RoundedRectangle(cornerRadius: 12))
         }
+        .accessibilityLabel(MedicineCaptureCopy.choosePhoto)
     }
 
     private var cancelButton: some View {
         Button(action: cancelCurrentOperation) {
-            Text("Cancel").fontWeight(.semibold).foregroundColor(.white)
+            Text(MedicineCaptureCopy.cancel)
+                .fontWeight(.semibold).foregroundColor(.white)
                 .padding(.horizontal, 32).padding(.vertical, 14)
                 .background(Color.white.opacity(0.15)).clipShape(Capsule())
         }
@@ -159,7 +189,8 @@ struct MedicineCaptureView: View {
 
     private var retryButton: some View {
         Button(action: { viewModel.reset() }) {
-            Label("Retake", systemImage: "arrow.counterclockwise")
+            Label(MedicineCaptureCopy.retake,
+                  systemImage: "arrow.counterclockwise")
                 .fontWeight(.semibold).foregroundColor(.white)
                 .padding(.horizontal, 32).padding(.vertical, 14)
                 .background(Color.white.opacity(0.15)).clipShape(Capsule())
@@ -175,7 +206,7 @@ struct MedicineCaptureView: View {
                 .background(Color.black.opacity(0.45))
                 .clipShape(Circle())
         }
-        .accessibilityLabel("Close medicine capture")
+        .accessibilityLabel(MedicineCaptureCopy.close)
     }
 
     private func beginCameraCapture() {
@@ -212,7 +243,8 @@ struct MedicineCaptureView: View {
         _ observations: [RecognizedTextObservation]
     ) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Recognized Text").font(.headline).foregroundColor(.white)
+            Text(MedicineCaptureCopy.recognizedText)
+                .font(.headline).foregroundColor(.white)
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     ForEach(Array(observations.enumerated()), id: \.offset) {

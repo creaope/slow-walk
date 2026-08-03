@@ -34,8 +34,12 @@ struct MedicineAssessmentPendingPanel: View {
             Text(heading)
                 .font(.headline)
 
-            Text("已确认药名：\(gate.confirmed.candidate.displayName)")
-                .font(.body)
+            if let medicineName = gate.preAssessmentSelection?
+                .confirmed.candidate.displayName
+            {
+                Text("已确认药名：\(medicineName)")
+                    .font(.body)
+            }
 
             // The badge and its explanation both come from the capability
             // table, so this panel cannot claim a different state from the
@@ -58,14 +62,24 @@ struct MedicineAssessmentPendingPanel: View {
                 .strokeBorder(.separator, style: StrokeStyle(lineWidth: 1, dash: [6, 4]))
         )
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            """
-            \(heading)。已确认药名 \(gate.confirmed.candidate.displayName)。
-            \(assessmentStatus.summaryLine)
-            本阶段不显示风险等级、剂量或用药结论，也不允许继续出发。
-            \(CompanionCopy.demoDataNotice)
-            """
-        )
+        .accessibilityLabel(accessibilityLabel(heading: heading))
+    }
+
+    private func accessibilityLabel(heading: String) -> String {
+        let medicineLine: String
+        if let medicineName = gate.preAssessmentSelection?
+            .confirmed.candidate.displayName
+        {
+            medicineLine = "已确认药名 \(medicineName)。"
+        } else {
+            medicineLine = "药名等待识别。"
+        }
+        return """
+        \(heading)。\(medicineLine)
+        \(assessmentStatus.summaryLine)
+        本阶段不显示风险等级、剂量或用药结论，也不允许继续出发。
+        \(CompanionCopy.demoDataNotice)
+        """
     }
 }
 

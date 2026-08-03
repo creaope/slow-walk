@@ -41,6 +41,11 @@ enum CompanionFlowReducer {
         case (.preDepartureCheck, .beginMedicineRead):
             return .scanningMedicine(.first)
 
+        case (.preDepartureCheck, .beginMedicineCaptureAssessment):
+            return .awaitingMedicineAssessment(
+                MedicineAssessmentGate(latestUpdate: nil)
+            )
+
         case let (.scanningMedicine(attempt), .medicineReadDidNotSucceed(setback)):
             guard !attempt.isAwaitingRecovery else { return nil }
             return .scanningMedicine(attempt.interrupted(by: setback))
@@ -56,6 +61,16 @@ enum CompanionFlowReducer {
                     candidates: candidates,
                     origin: .readFromPhoto,
                     attemptNumber: attempt.attemptNumber
+                )
+            )
+
+        case let (.preDepartureCheck, .chooseFromFrequentList(candidates)):
+            guard !candidates.isEmpty else { return nil }
+            return .awaitingMedicineConfirmation(
+                MedicineConfirmationPrompt(
+                    candidates: candidates,
+                    origin: .chosenFromFrequentList,
+                    attemptNumber: 1
                 )
             )
 
@@ -126,8 +141,7 @@ enum CompanionFlowReducer {
             }
             return .awaitingMedicineAssessment(
                 MedicineAssessmentGate(
-                    confirmed: gate.confirmed,
-                    prompt: gate.prompt,
+                    preAssessmentSelection: gate.preAssessmentSelection,
                     latestUpdate: update,
                     displayedResultRequestID: gate.displayedResultRequestID
                 )
@@ -143,8 +157,7 @@ enum CompanionFlowReducer {
             else { return nil }
             return .awaitingMedicineAssessment(
                 MedicineAssessmentGate(
-                    confirmed: gate.confirmed,
-                    prompt: gate.prompt,
+                    preAssessmentSelection: gate.preAssessmentSelection,
                     latestUpdate: gate.latestUpdate,
                     displayedResultRequestID: requestID
                 )
@@ -162,13 +175,32 @@ enum CompanionFlowReducer {
             // The gate is never a dead end: the candidate list it came from is
             // still available, so a different medicine can be chosen without
             // re-reading the box.
-            return .awaitingMedicineConfirmation(gate.prompt)
+            guard let prompt = gate.preAssessmentSelection?.prompt else {
+                return nil
+            }
+            return .awaitingMedicineConfirmation(prompt)
+
+        case let (
+            .awaitingMedicineAssessment,
+            .chooseFromFrequentList(candidates)
+        ):
+            guard !candidates.isEmpty else { return nil }
+            return .awaitingMedicineConfirmation(
+                MedicineConfirmationPrompt(
+                    candidates: candidates,
+                    origin: .chosenFromFrequentList,
+                    attemptNumber: 1
+                )
+            )
 
         case let (.awaitingMedicineAssessment(gate), .retakeMedicinePhoto):
             // The other way out: read the box again from the start.
+            guard let prompt = gate.preAssessmentSelection?.prompt else {
+                return nil
+            }
             return .scanningMedicine(
                 MedicineReadAttempt(
-                    attemptNumber: gate.prompt.attemptNumber + 1,
+                    attemptNumber: prompt.attemptNumber + 1,
                     setback: nil
                 )
             )

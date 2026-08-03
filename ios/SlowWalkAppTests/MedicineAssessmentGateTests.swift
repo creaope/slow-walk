@@ -48,11 +48,177 @@ struct MedicineAssessmentGateTests {
             Issue.record("expected the assessment gate, got \(String(describing: next))")
             return
         }
-        #expect(gate.confirmed.candidate == candidate)
+        #expect(gate.preAssessmentSelection?.confirmed.candidate == candidate)
         // Nothing has been assessed: the gate opens with `latestUpdate: nil`,
         // which is semantically `.idle`.
         #expect(gate.latestUpdate == nil)
         #expect(gate.assessmentState == .idle)
+    }
+
+    @Test func primaryActionCreatesCaptureFirstGateWithoutUsingMockScanner() {
+        let store = RecordingCareRecordStore()
+        let scanner = SpyScanSimulator(
+            scriptedOutcome: .findsCandidates(MedicineCandidate.demoCandidates)
+        )
+        let session = CompanionSessionModel(
+            records: store,
+            simulator: scanner,
+            plan: .demo,
+            readDelay: ControllableReadDelay(),
+            capabilities: .phase0
+        )
+
+        #expect(
+            CompanionView.MedicineCaptureEntryAction.perform(
+                on: session,
+                startingSession: true
+            )
+        )
+        guard case let .awaitingMedicineAssessment(gate) = session.state else {
+            Issue.record("primary action did not establish the assessment gate")
+            return
+        }
+        let lease = session.currentAssessmentGateLease
+
+        #expect(lease != nil)
+        #expect(gate.preAssessmentSelection == nil)
+        #expect(gate.latestUpdate == nil)
+        #expect(gate.assessmentState == .idle)
+        #expect(session.pendingReadTask == nil)
+        #expect(scanner.outcomeCalls.isEmpty)
+        #expect(store.kinds.count == 1)
+        #expect(store.kinds.contains { kind in
+            if case .medicineConfirmed = kind { return true }
+            if case .careActionShown = kind { return true }
+            return false
+        } == false)
+
+        #expect(session.beginMedicineCaptureAssessment() == false)
+        #expect(session.currentAssessmentGateLease == lease)
+    }
+
+    @Test func frequentMedicineListRemainsAnExplicitFallback() {
+        let scanner = SpyScanSimulator()
+        let session = CompanionSessionModel(
+            records: RecordingCareRecordStore(),
+            simulator: scanner,
+            plan: .demo,
+            readDelay: ControllableReadDelay(),
+            capabilities: .phase0
+        )
+
+        #expect(session.startCompanion())
+        session.chooseFromFrequentList()
+
+        guard case let .awaitingMedicineConfirmation(prompt) = session.state else {
+            Issue.record("frequent list did not open its confirmation step")
+            return
+        }
+        #expect(prompt.origin == .chosenFromFrequentList)
+        #expect(prompt.candidates == MedicineCandidate.demoFrequentlyUsed)
+        #expect(scanner.outcomeCalls.isEmpty)
+    }
+
+    @Test func canonicalIdentityRecordsOnlyAfterResultAndDisplay() {
+        let store = RecordingCareRecordStore()
+        let session = CompanionSessionModel(
+            records: store,
+            simulator: SpyScanSimulator(),
+            plan: .demo,
+            readDelay: ControllableReadDelay(),
+            capabilities: .phase0
+        )
+        #expect(
+            CompanionView.MedicineCaptureEntryAction.perform(
+                on: session,
+                startingSession: true
+            )
+        )
+
+        let candidate = Self.canonicalCandidate
+        let ambiguousResponse = Self.response(
+            resolution: MedicineResolution(
+                status: .ambiguous,
+                candidates: [candidate],
+                selectedMedicine: nil,
+                evidence: Self.presentation.response.resolution.evidence,
+                requiresUserConfirmation: true
+            )
+        )
+        let ambiguousState = MedicineAssessmentViewState
+            .requiresMedicineConfirmation(
+                MedicineConfirmationRequirement(
+                    reason: .ambiguousMedicine,
+                    recognitionInput: Self.recognitionInput,
+                    response: ambiguousResponse
+                )
+            )
+        session.applyAssessmentStateUpdate(
+            MedicineAssessmentStateUpdate(
+                sequenceNumber: 1,
+                state: ambiguousState
+            )
+        )
+
+        let confirmation = CompanionView.CanonicalCandidateConfirmation(
+            ambiguousState
+        )
+        #expect(confirmation?.candidates == [candidate])
+        #expect(Self.medicineConfirmedCount(in: store) == 0)
+        #expect(Self.careActionShownCount(in: store) == 0)
+
+        let result = MedicineAssessmentPresentation(
+            response: Self.response(
+                resolution: MedicineResolution(
+                    status: .resolved,
+                    candidates: [candidate],
+                    selectedMedicine: candidate.medicine,
+                    evidence: Self.presentation.response.resolution.evidence,
+                    requiresUserConfirmation: false
+                )
+            )
+        )
+        let resultUpdate = MedicineAssessmentStateUpdate(
+            sequenceNumber: 2,
+            state: .result(result)
+        )
+        session.applyAssessmentStateUpdate(resultUpdate)
+        session.applyAssessmentStateUpdate(resultUpdate)
+
+        #expect(Self.medicineConfirmedCount(in: store) == 1)
+        #expect(Self.careActionShownCount(in: store) == 0)
+        #expect(
+            store.kinds.contains(
+                .medicineConfirmed(
+                    medicineName: candidate.medicine.canonicalName,
+                    origin: .readFromPhoto
+                )
+            )
+        )
+
+        #expect(session.medicineAssessmentResultDidDisplay())
+        #expect(session.medicineAssessmentResultDidDisplay() == false)
+        #expect(Self.careActionShownCount(in: store) == 1)
+        #expect(
+            store.kinds.contains(
+                .careActionShown(
+                    medicineName: candidate.medicine.canonicalName
+                )
+            )
+        )
+        #expect(session.canDepart)
+    }
+
+    @Test func medicineCaptureCopyContainsNoASCIIEnglishText() {
+        #expect(MedicineCaptureCopy.allUserVisibleText.count == 16)
+        #expect(
+            MedicineCaptureCopy.allUserVisibleText.allSatisfy { text in
+                text.unicodeScalars.allSatisfy { scalar in
+                    !(65...90).contains(Int(scalar.value))
+                        && !(97...122).contains(Int(scalar.value))
+                }
+            }
+        )
     }
 
     /// A confirmation may only ever land at the assessment gate.
@@ -88,7 +254,9 @@ struct MedicineAssessmentGateTests {
             }
             // And it arrives with nothing assessed.
             #expect(gate.latestUpdate == nil)
-            #expect(gate.confirmed.candidate == candidate)
+            #expect(
+                gate.preAssessmentSelection?.confirmed.candidate == candidate
+            )
         }
     }
 
@@ -281,8 +449,7 @@ struct MedicineAssessmentGateTests {
         )
         let originalGate = Self.makeGate(latestUpdate: nil)
         let gate = MedicineAssessmentGate(
-            confirmed: originalGate.confirmed,
-            prompt: originalGate.prompt,
+            preAssessmentSelection: originalGate.preAssessmentSelection,
             latestUpdate: MedicineAssessmentStateUpdate(
                 sequenceNumber: 2,
                 state: .result(newPresentation)
@@ -899,10 +1066,20 @@ struct MedicineAssessmentGateTests {
         }
     }
 
-    /// Presentation cannot invent a candidate confirmation because the
-    /// canonical callback provides no candidate identity.
-    @Test func assessmentPresentationProvidesNoCandidateConfirmation() {
-        #expect(CompanionView().assessmentCandidateConfirmationAction == nil)
+    /// Candidate controls exist only when canonical state provides identities.
+    @Test func assessmentPresentationNeverInventsCandidateConfirmation() {
+        #expect(CompanionView.CanonicalCandidateConfirmation(.idle) == nil)
+        #expect(
+            CompanionView.CanonicalCandidateConfirmation(
+                .requiresMedicineConfirmation(
+                    MedicineConfirmationRequirement(
+                        reason: .noRecognizedText,
+                        recognitionInput: Self.recognitionInput,
+                        response: nil
+                    )
+                )
+            ) == nil
+        )
     }
 
     /// Hosting the real Companion assessment branch exercises SwiftUI's
@@ -1107,6 +1284,7 @@ struct MedicineAssessmentGateTests {
     /// Every event the flow accepts.
     static let everyEvent: [CompanionFlowEvent] = [
         .startCompanion,
+        .beginMedicineCaptureAssessment,
         .beginMedicineRead,
         .medicineReadDidNotSucceed(.textNotLegible),
         .medicineReadDidNotSucceed(.noMedicineNameFound),
@@ -1164,6 +1342,30 @@ struct MedicineAssessmentGateTests {
             state: .cancelled
         ),
     ]
+
+    static let recognitionInput = MedicineRecognitionInput(
+        recognizedTexts: ["测试药品"],
+        capturedAt: Date(timeIntervalSince1970: 0),
+        languageCode: "zh-Hans",
+        rawConfidence: 0.9
+    )
+
+    static let canonicalCandidate = SlowWalkDomain.MedicineCandidate(
+        medicine: SlowWalkDomain.Medicine(
+            id: "canonical-medicine",
+            canonicalName: "规范药品名",
+            aliases: [],
+            activeIngredientIDs: ["canonical-ingredient"],
+            medicineCategory: .other,
+            sourceReferences: [],
+            dosageTextFromSource: nil,
+            contraindicationTags: [],
+            dataVersion: "test-v1"
+        ),
+        matchScore: 1,
+        matchedAlias: nil,
+        matchReasons: [.canonicalExact]
+    )
 
     /// The test `MedicineAssessmentPresentation`, reused across tests.
     static let presentation: MedicineAssessmentPresentation = {
@@ -1234,6 +1436,26 @@ struct MedicineAssessmentGateTests {
         )
     }
 
+    static func response(
+        resolution: MedicineResolution
+    ) -> MedicineAssessmentResponseDTO {
+        let original = presentation.response
+        return MedicineAssessmentResponseDTO(
+            requestID: original.requestID,
+            resolution: resolution,
+            assessment: original.assessment,
+            actionCard: original.actionCard,
+            cacheHit: original.cacheHit,
+            resolutionCacheStatus: original.resolutionCacheStatus,
+            knowledgeCacheStatus: original.knowledgeCacheStatus,
+            sourceDataVersion: original.sourceDataVersion,
+            generatedAt: original.generatedAt,
+            apiVersion: original.apiVersion,
+            healthContextValidation: original.healthContextValidation,
+            medicineKnowledge: original.medicineKnowledge
+        )
+    }
+
     static func host(
         _ view: CompanionView
     ) -> (
@@ -1258,6 +1480,15 @@ struct MedicineAssessmentGateTests {
     ) -> Int {
         store.kinds.count { kind in
             if case .careActionShown = kind { return true }
+            return false
+        }
+    }
+
+    static func medicineConfirmedCount(
+        in store: RecordingCareRecordStore
+    ) -> Int {
+        store.kinds.count { kind in
+            if case .medicineConfirmed = kind { return true }
             return false
         }
     }

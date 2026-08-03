@@ -64,7 +64,17 @@ struct ConfirmedMedicine: Equatable, Hashable {
     let origin: MedicineChoiceOrigin
 }
 
-/// The step between confirming a medicine and being shown anything about it.
+/// An App-owned medicine selection made before canonical assessment begins.
+///
+/// Capture-first gates deliberately have no selection. This value exists only
+/// for the explicit frequent-list and legacy/mock candidate paths.
+struct PreAssessmentMedicineSelection: Equatable {
+    let confirmed: ConfirmedMedicine
+    let prompt: MedicineConfirmationPrompt
+}
+
+/// The canonical assessment gate, entered before Capture or after an explicit
+/// medicine selection.
 ///
 /// This state is the safety gate. It exists so a confirmed *name* can never be
 /// mistaken for an assessed *medicine*: confirmation answers "which box is
@@ -79,10 +89,9 @@ struct ConfirmedMedicine: Equatable, Hashable {
 ///
 /// `Equatable` only — no `Hashable` usage exists in this build.
 struct MedicineAssessmentGate: Equatable {
-    let confirmed: ConfirmedMedicine
-    /// The prompt the confirmation came from, so a different candidate can be
-    /// chosen without re-reading the box.
-    let prompt: MedicineConfirmationPrompt
+    /// `nil` for capture-first assessment, where canonical resolution owns the
+    /// medicine identity. Non-nil only after an explicit App-owned selection.
+    let preAssessmentSelection: PreAssessmentMedicineSelection?
     /// The latest canonical state update accepted. `nil` means no update has
     /// been received — equivalent to `.idle`.
     let latestUpdate: MedicineAssessmentStateUpdate?
@@ -97,8 +106,30 @@ struct MedicineAssessmentGate: Equatable {
         latestUpdate: MedicineAssessmentStateUpdate?,
         displayedResultRequestID: UUID? = nil
     ) {
-        self.confirmed = confirmed
-        self.prompt = prompt
+        preAssessmentSelection = PreAssessmentMedicineSelection(
+            confirmed: confirmed,
+            prompt: prompt
+        )
+        self.latestUpdate = latestUpdate
+        self.displayedResultRequestID = displayedResultRequestID
+    }
+
+    /// Creates a capture-first gate without inventing a medicine identity.
+    init(
+        latestUpdate: MedicineAssessmentStateUpdate?,
+        displayedResultRequestID: UUID? = nil
+    ) {
+        preAssessmentSelection = nil
+        self.latestUpdate = latestUpdate
+        self.displayedResultRequestID = displayedResultRequestID
+    }
+
+    init(
+        preAssessmentSelection: PreAssessmentMedicineSelection?,
+        latestUpdate: MedicineAssessmentStateUpdate?,
+        displayedResultRequestID: UUID?
+    ) {
+        self.preAssessmentSelection = preAssessmentSelection
         self.latestUpdate = latestUpdate
         self.displayedResultRequestID = displayedResultRequestID
     }
@@ -156,8 +187,8 @@ enum CompanionFlowState: Equatable {
     case preDepartureCheck
     case scanningMedicine(MedicineReadAttempt)
     case awaitingMedicineConfirmation(MedicineConfirmationPrompt)
-    /// A medicine is confirmed and a formal assessment is owed. Nothing is
-    /// shown about the medicine and the session cannot move on from here.
+    /// A formal assessment is owed; the medicine identity may still be unknown.
+    /// Nothing is shown about the medicine and the session cannot move on.
     /// The gate carries the latest canonical `MedicineAssessmentStateUpdate`.
     case awaitingMedicineAssessment(MedicineAssessmentGate)
     case travelling
@@ -185,6 +216,9 @@ enum CompanionFlowState: Equatable {
 /// `Equatable` only — no `Hashable` usage exists in this build.
 enum CompanionFlowEvent: Equatable {
     case startCompanion
+    /// Opens a canonical assessment gate before any medicine identity exists.
+    case beginMedicineCaptureAssessment
+    /// Legacy/mock read entry retained for previews and focused tests.
     case beginMedicineRead
     case medicineReadDidNotSucceed(MedicineReadSetback)
     case retryMedicineRead

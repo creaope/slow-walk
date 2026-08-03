@@ -100,7 +100,7 @@ enum CompanionCopy {
         case .notStarted:
             "今天的陪伴还没有开始。"
         case .preDepartureCheck:
-            "出门前，我们一起把要带的东西过一遍。"
+            "出门前，先确认这次要用的药。"
         case let .scanningMedicine(attempt):
             if let setback = attempt.setback {
                 setbackSituation(setback)
@@ -145,7 +145,7 @@ enum CompanionCopy {
         case .notStarted:
             "准备好以后，点击\u{201c}开始陪伴\u{201d}。"
         case .preDepartureCheck:
-            "先确认要带的药，再出门。"
+            "请拍摄药品标签，也可以从常用药名里选择。"
         case let .scanningMedicine(attempt):
             if attempt.setback != nil {
                 "可以重新试一次，也可以直接从常用药名里选。"
@@ -159,10 +159,12 @@ enum CompanionCopy {
             case .chosenFromFrequentList:
                 "请选出这次要用的药。"
             }
-        case .awaitingMedicineAssessment:
-            // Never "先看完提示再继续出发": there is no prompt to read and no
-            // departure to make.
-            "可以重新选择药名，或者先结束这次陪伴。"
+        case let .awaitingMedicineAssessment(gate):
+            if gate.preAssessmentSelection == nil {
+                "请按页面提示完成用药检查。"
+            } else {
+                "可以重新选择药名，或者先结束这次陪伴。"
+            }
         case .travelling:
             // Never "到站前会提前提醒": `.arrivalReminder` is unavailable.
             "本阶段不会自动提醒到站，需要手动进入下一步。"
@@ -184,8 +186,12 @@ enum CompanionCopy {
                 : nil
         case .awaitingMedicineConfirmation:
             "不同的药提示不一样，确认之后才准确。"
-        case .awaitingMedicineAssessment:
-            "确认药名只说明这是哪一盒药，还不能说明能不能吃。"
+        case let .awaitingMedicineAssessment(gate):
+            if gate.preAssessmentSelection == nil {
+                "药名和用药提示都以正式评估结果为准。"
+            } else {
+                "确认药名只说明这是哪一盒药，还不能说明能不能吃。"
+            }
         case .approachingStop:
             "提前一点准备，下车时不用着急。"
         case .notStarted, .travelling, .completed:
@@ -208,28 +214,32 @@ enum CompanionCopy {
         _ gate: MedicineAssessmentGate,
         capabilities: CapabilityCatalog
     ) -> String {
-        let name = gate.confirmed.candidate.displayName
+        let selectedName = gate.preAssessmentSelection?
+            .confirmed.candidate.displayName
         switch gate.assessmentState {
         case .idle:
-            return "已确认药名：\(name)。尚未开始正式评估。"
+            if let selectedName {
+                return "已确认药名：\(selectedName)。尚未开始正式评估。"
+            }
+            return "尚未开始识别药品。"
         case .recognizing:
-            return "已确认药名：\(name)。正在进行文字识别。"
+            return "正在识别药品标签上的文字。"
         case .requiresMedicineConfirmation:
-            return "已确认药名：\(name)。系统需要进一步确认药名。"
+            return "识别结果还不能确定药名，需要进一步确认。"
         case .assessing:
-            return "已确认药名：\(name)。正在进行正式评估。"
+            return "正在进行正式评估。"
         case .result:
             // States the result exists without describing it — the
             // description belongs to SlowWalkPresentation, not here.
             // Never copies the ActionCard wording, risk level, or
             // any clinical claim.
-            return "已确认药名：\(name)。正式评估结果已生成，等待展示。"
+            return "正式评估结果已生成，等待展示。"
         case .failed:
             let detail = capabilities.detail(of: .medicineRiskAssessment)
                 ?? "评估未能完成。"
-            return "已确认药名：\(name)，但评估未能完成。\(detail)"
+            return "评估未能完成。\(detail)"
         case .cancelled:
-            return "已确认药名：\(name)，评估已取消。"
+            return "评估已取消。"
         }
     }
 
@@ -254,7 +264,7 @@ enum CompanionCopy {
     static let startCompanionTitle = "开始陪伴"
     static let continueCompanionTitle = "继续陪伴"
     static let completeMedicineCheckTitle = "完成用药检查"
-    static let beginMedicineReadTitle = "确认要带的药"
+    static let beginMedicineReadTitle = "拍摄药品标签"
     static let reconsiderMedicineTitle = "重新选择药名"
     static let approachStopTitle = "模拟：即将到站"
     static let arriveSafelyTitle = "已安全到达"

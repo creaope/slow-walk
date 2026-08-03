@@ -1,6 +1,7 @@
 import Foundation
 import SlowWalkAPIContracts
 import SlowWalkClientCore
+import SlowWalkDomain
 
 struct MedicineAssessmentGateLease: Equatable, Sendable {
     private let identifier: UUID
@@ -32,6 +33,7 @@ final class CompanionSessionModel {
     private let plan: TodayPlan
     private var assessmentGateInvalidationHandler:
         (@MainActor (MedicineAssessmentGateLease) -> Void)?
+    private var recordedCanonicalMedicineRequestIDs: Set<UUID> = []
 
     /// What this build can really do.
     ///
@@ -161,6 +163,12 @@ final class CompanionSessionModel {
         recordReadStartedAndRun()
     }
 
+    /// Establishes the canonical gate before Capture has produced an identity.
+    @discardableResult
+    func beginMedicineCaptureAssessment() -> Bool {
+        send(.beginMedicineCaptureAssessment, gateLeaseChange: .replace)
+    }
+
     func retryMedicineRead() {
         guard send(.retryMedicineRead) else { return }
         recordReadStartedAndRun()
@@ -168,7 +176,13 @@ final class CompanionSessionModel {
 
     func chooseFromFrequentList() {
         let candidates = MedicineCandidate.demoFrequentlyUsed
-        guard send(.chooseFromFrequentList(candidates)) else { return }
+        let leaseChange: GateLeaseChange = assessmentGate == nil
+            ? .preserve
+            : .invalidate
+        guard send(
+            .chooseFromFrequentList(candidates),
+            gateLeaseChange: leaseChange
+        ) else { return }
         // The read is being abandoned in favour of the list, so its result
         // must not arrive later and overwrite this choice.
         invalidatePendingRead()
@@ -252,10 +266,14 @@ final class CompanionSessionModel {
         _ update: MedicineAssessmentStateUpdate,
         forGateLease lease: MedicineAssessmentGateLease
     ) {
-        guard case .awaitingMedicineAssessment = state,
+        guard let gate = assessmentGate,
               currentAssessmentGateLease == lease
         else { return }
         guard send(.medicineAssessmentStateDidUpdate(update)) else { return }
+        recordCanonicalMedicineConfirmation(
+            from: update,
+            captureFirst: gate.preAssessmentSelection == nil
+        )
     }
 
     /// Acknowledges that the current canonical result was actually displayed.
@@ -274,10 +292,12 @@ final class CompanionSessionModel {
         guard send(.medicineAssessmentResultDidDisplay(requestID)) else {
             return false
         }
-        _ = careActionShownRecorder.recordDisplayed(
-            requestID: requestID,
-            medicineName: gate.confirmed.candidate.displayName
-        )
+        if let medicineName = displayedMedicineName(for: gate) {
+            _ = careActionShownRecorder.recordDisplayed(
+                requestID: requestID,
+                medicineName: medicineName
+            )
+        }
         return true
     }
 
@@ -386,6 +406,47 @@ final class CompanionSessionModel {
         guard let lease = currentAssessmentGateLease else { return }
         currentAssessmentGateLease = nil
         assessmentGateInvalidationHandler?(lease)
+    }
+
+    private func recordCanonicalMedicineConfirmation(
+        from update: MedicineAssessmentStateUpdate,
+        captureFirst: Bool
+    ) {
+        guard captureFirst,
+              case let .result(presentation) = update.state,
+              presentation.response.resolution.status == .resolved,
+              let medicine = presentation.response.resolution.selectedMedicine,
+              !medicine.canonicalName.trimmingCharacters(
+                in: .whitespacesAndNewlines
+              ).isEmpty,
+              recordedCanonicalMedicineRequestIDs.insert(
+                presentation.response.requestID
+              ).inserted
+        else { return }
+
+        records.append(
+            .medicineConfirmed(
+                medicineName: medicine.canonicalName,
+                origin: .readFromPhoto
+            )
+        )
+    }
+
+    private func displayedMedicineName(
+        for gate: MedicineAssessmentGate
+    ) -> String? {
+        guard case let .result(presentation) = gate.assessmentState else {
+            return nil
+        }
+        if presentation.response.resolution.status == .resolved,
+           let medicine = presentation.response.resolution.selectedMedicine,
+           !medicine.canonicalName.trimmingCharacters(
+            in: .whitespacesAndNewlines
+           ).isEmpty
+        {
+            return medicine.canonicalName
+        }
+        return gate.preAssessmentSelection?.confirmed.candidate.displayName
     }
 }
 
