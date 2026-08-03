@@ -2,20 +2,30 @@
 import PhotosUI
 import SlowWalkClientCore
 import SwiftUI
+import UIKit
 
 enum MedicineCaptureCopy {
     static let assessmentStartFailed = "无法开始用药检查，请重试。"
     static let capturePrompt = "请拍摄药品标签"
     static let requestingCameraPermission = "正在请求相机权限\u{2026}"
-    static let cameraPermissionDenied = "相机权限未开启"
+    static let startingCamera = "正在打开相机\u{2026}"
+    static let cameraPermissionDenied =
+        "相机权限已关闭。可以前往设置开启，或从相册选择药品照片。"
+    static let cameraRestricted =
+        "此设备当前无法使用相机。可以改从相册选择药品照片。"
     static let capturing = "正在拍摄\u{2026}"
+    static let loadingPhoto = "正在读取照片\u{2026}"
     static let processingImage = "正在处理药品图片\u{2026}"
     static let noTextFound = "没有识别到文字，请重拍。"
     static let recognitionFailed = "药品图片识别失败"
     static let cancelled = "已取消"
-    static let cameraUnavailable = "相机暂时无法使用"
+    static let cameraUnavailable =
+        "此设备暂时无法使用相机。可以改从相册选择药品照片。"
+    static let useCamera = "使用相机"
     static let capture = "拍摄"
-    static let choosePhoto = "从照片中选择"
+    static let choosePhoto = "从相册选择"
+    static let openSettings = "前往设置"
+    static let retry = "重新尝试"
     static let cancel = "取消"
     static let retake = "重拍"
     static let close = "关闭用药检查"
@@ -23,9 +33,10 @@ enum MedicineCaptureCopy {
 
     static let allUserVisibleText = [
         assessmentStartFailed, capturePrompt, requestingCameraPermission,
-        cameraPermissionDenied, capturing, processingImage, noTextFound,
-        recognitionFailed, cancelled, cameraUnavailable, capture, choosePhoto,
-        cancel, retake, close, recognizedText,
+        startingCamera, cameraPermissionDenied, cameraRestricted, capturing,
+        loadingPhoto, processingImage, noTextFound, recognitionFailed,
+        cancelled, cameraUnavailable, useCamera, capture, choosePhoto,
+        openSettings, retry, cancel, retake, close, recognizedText,
     ]
 }
 
@@ -52,9 +63,11 @@ private struct CameraPreview: UIViewRepresentable {
 
 struct MedicineCaptureView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.scenePhase) private var scenePhase
     @StateObject private var viewModel: MedicineCaptureViewModel
     @State private var photosPickerItem: PhotosPickerItem?
-    @State private var isSessionStarted = false
+    @State private var isPhotosPickerPresented = false
+    @State private var activePhotoLoadID: UUID?
     @State private var photoLoadTask: Task<Void, Never>?
     @State private var photoLoadGeneration = 0
 
@@ -72,11 +85,12 @@ struct MedicineCaptureView: View {
             closeButton
                 .padding(20)
         }
-        .task { await setupSession() }
         .onDisappear {
-            isSessionStarted = false
             photoLoadTask?.cancel()
             photoLoadTask = nil
+            activePhotoLoadID = nil
+            isPhotosPickerPresented = false
+            viewModel.endPhotosPickerPresentation()
             photoLoadGeneration &+= 1
             Task { await viewModel.dismiss() }
         }
@@ -84,10 +98,18 @@ struct MedicineCaptureView: View {
             guard let newItem else { return }
             beginLoadingPhoto(newItem)
         }
+        .onChange(of: scenePhase) { _, newPhase in
+            scenePhaseDidChange(newPhase)
+        }
+        .photosPicker(
+            isPresented: photosPickerPresentationBinding,
+            selection: $photosPickerItem,
+            matching: .images
+        )
     }
 
     @ViewBuilder private var backgroundView: some View {
-        if isSessionStarted {
+        if viewModel.isCameraSessionStarted {
             CameraPreview(
                 previewLayer: viewModel.previewSource.previewLayer
             ).ignoresSafeArea()
@@ -111,9 +133,16 @@ struct MedicineCaptureView: View {
             case .permissionDenied:
                 statusOverlay(icon: "camera.slash.fill",
                               text: MedicineCaptureCopy.cameraPermissionDenied)
+            case .cameraRestricted:
+                statusOverlay(icon: "camera.slash.fill",
+                              text: MedicineCaptureCopy.cameraRestricted)
+            case .startingCamera:
+                statusOverlay(icon: nil, text: MedicineCaptureCopy.startingCamera)
             case .ready:           EmptyView()
             case .capturing:
                 statusOverlay(icon: nil, text: MedicineCaptureCopy.capturing)
+            case .loadingPhoto:
+                statusOverlay(icon: nil, text: MedicineCaptureCopy.loadingPhoto)
             case .recognizing:
                 statusOverlay(icon: nil, text: MedicineCaptureCopy.processingImage)
             case .success(let observations):
@@ -142,9 +171,19 @@ struct MedicineCaptureView: View {
                     retryButton
                 } else {
                     switch viewModel.state {
-                    case .ready, .idle:
+                    case .idle:
+                        cameraButton; photosPickerButton
+                    case .ready:
                         captureButton; photosPickerButton
-                    case .capturing, .recognizing:
+                    case .permissionDenied:
+                        if canOpenSettings { settingsButton }
+                        photosPickerButton
+                    case .cameraRestricted:
+                        photosPickerButton
+                    case .cameraUnavailable:
+                        retryCameraButton; photosPickerButton
+                    case .requestingPermission, .startingCamera,
+                         .capturing, .loadingPhoto, .recognizing:
                         cancelButton
                     case .success, .noTextFound,
                          .recognitionFailed, .cancelled:
@@ -154,6 +193,17 @@ struct MedicineCaptureView: View {
                 }
             }.padding(.bottom, 40)
         }
+    }
+
+    private var cameraButton: some View {
+        Button(action: beginCameraCapture) {
+            Image(systemName: "camera.fill")
+                .font(.title2).foregroundColor(.white)
+                .frame(width: 48, height: 48)
+                .background(Color.white.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .accessibilityLabel(MedicineCaptureCopy.useCamera)
     }
 
     private var captureButton: some View {
@@ -167,15 +217,37 @@ struct MedicineCaptureView: View {
     }
 
     private var photosPickerButton: some View {
-        PhotosPicker(selection: $photosPickerItem,
-                     matching: .images, photoLibrary: .shared()) {
+        Button(action: presentPhotosPicker) {
             Image(systemName: "photo.on.rectangle")
                 .font(.title2).foregroundColor(.white)
                 .frame(width: 48, height: 48)
                 .background(Color.white.opacity(0.15))
-                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
         }
         .accessibilityLabel(MedicineCaptureCopy.choosePhoto)
+        .disabled(!viewModel.canChoosePhoto)
+    }
+
+    private var settingsButton: some View {
+        Button(action: openSettings) {
+            Label(MedicineCaptureCopy.openSettings, systemImage: "gearshape")
+                .fontWeight(.semibold)
+                .foregroundColor(.white)
+                .padding(.horizontal, 20).padding(.vertical, 14)
+                .background(Color.white.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+    }
+
+    private var retryCameraButton: some View {
+        Button(action: { viewModel.reset() }) {
+            Label(MedicineCaptureCopy.retry, systemImage: "arrow.clockwise")
+                .fontWeight(.semibold)
+                .foregroundColor(.white)
+                .padding(.horizontal, 20).padding(.vertical, 14)
+                .background(Color.white.opacity(0.15))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
     }
 
     private var cancelButton: some View {
@@ -210,15 +282,20 @@ struct MedicineCaptureView: View {
     }
 
     private func beginCameraCapture() {
-        photoLoadTask?.cancel()
-        photoLoadTask = nil
-        photoLoadGeneration &+= 1
-        viewModel.capturePhoto()
+        switch viewModel.state {
+        case .idle:
+            viewModel.beginCameraPresentation()
+        case .ready:
+            viewModel.capturePhoto()
+        default:
+            break
+        }
     }
 
     private func cancelCurrentOperation() {
         photoLoadTask?.cancel()
         photoLoadTask = nil
+        activePhotoLoadID = nil
         photoLoadGeneration &+= 1
         viewModel.cancel()
     }
@@ -264,60 +341,102 @@ struct MedicineCaptureView: View {
 
     // MARK: - Actions
 
-    private func setupSession() async {
-        let status = CameraCaptureService.authorizationStatus
-        switch status {
-        case .authorized:
-            await startAuthorizedSession()
-        case .notDetermined:
-            viewModel.requestPermission()
-            let granted = await CameraCaptureService.requestPermission()
-            guard granted else {
-                viewModel.setPermissionAuthorized(false)
-                return
+    private var photosPickerPresentationBinding: Binding<Bool> {
+        Binding(
+            get: { isPhotosPickerPresented },
+            set: { isPresented in
+                isPhotosPickerPresented = isPresented
+                if !isPresented {
+                    viewModel.endPhotosPickerPresentation()
+                }
             }
-            await startAuthorizedSession()
-        case .denied, .restricted:
-            viewModel.setPermissionAuthorized(false)
-        @unknown default:
-            viewModel.setCameraUnavailable()
-        }
+        )
     }
 
-    private func startAuthorizedSession() async {
-        do {
-            try await viewModel.startSession()
-            try Task.checkCancellation()
-            isSessionStarted = true
-        } catch is CancellationError {
-            return
-        } catch {
-            viewModel.setCameraUnavailable()
-        }
+    private func presentPhotosPicker() {
+        guard viewModel.beginPhotosPickerPresentation() else { return }
+        isPhotosPickerPresented = true
     }
 
     private func beginLoadingPhoto(_ item: PhotosPickerItem) {
-        photoLoadTask?.cancel()
+        guard photoLoadTask == nil,
+              let loadID = viewModel.beginPhotoLoading()
+        else {
+            photosPickerItem = nil
+            return
+        }
+        activePhotoLoadID = loadID
+        photosPickerItem = nil
+        isPhotosPickerPresented = false
+        viewModel.endPhotosPickerPresentation()
         photoLoadGeneration &+= 1
         let generation = photoLoadGeneration
         photoLoadTask = Task {
+            defer {
+                if activePhotoLoadID == loadID {
+                    activePhotoLoadID = nil
+                    photoLoadTask = nil
+                }
+            }
             do {
                 let data = try await item.loadTransferable(
                     type: Data.self
                 )
                 try Task.checkCancellation()
                 guard generation == photoLoadGeneration,
-                      let data, !data.isEmpty
+                      activePhotoLoadID == loadID
                 else { return }
-                viewModel.capture(
-                    imageData: data, orientation: .up, capturedAt: Date()
+                guard let data, !data.isEmpty else {
+                    viewModel.photoLoadingFailed(loadID: loadID)
+                    return
+                }
+                _ = viewModel.submitLoadedPhoto(
+                    loadID: loadID,
+                    imageData: data,
+                    orientation: .up,
+                    capturedAt: Date()
                 )
-                photosPickerItem = nil
             } catch is CancellationError { return }
             catch {
-                guard generation == photoLoadGeneration else { return }
-                viewModel.setPhotoLoadingFailed()
+                guard generation == photoLoadGeneration,
+                      activePhotoLoadID == loadID
+                else { return }
+                viewModel.photoLoadingFailed(loadID: loadID)
             }
         }
+    }
+
+    private func scenePhaseDidChange(_ phase: ScenePhase) {
+        switch phase {
+        case .active:
+            viewModel.appDidBecomeActive()
+        case .background:
+            photoLoadTask?.cancel()
+            photoLoadTask = nil
+            activePhotoLoadID = nil
+            photoLoadGeneration &+= 1
+            photosPickerItem = nil
+            isPhotosPickerPresented = false
+            viewModel.endPhotosPickerPresentation()
+            Task { await viewModel.appDidEnterBackground() }
+        case .inactive:
+            break
+        @unknown default:
+            break
+        }
+    }
+
+    private var canOpenSettings: Bool {
+        guard let url = URL(string: UIApplication.openSettingsURLString) else {
+            return false
+        }
+        return UIApplication.shared.canOpenURL(url)
+    }
+
+    private func openSettings() {
+        guard let url = URL(string: UIApplication.openSettingsURLString),
+              UIApplication.shared.canOpenURL(url)
+        else { return }
+        UIApplication.shared.open(url, options: [:], completionHandler: nil)
     }
 }

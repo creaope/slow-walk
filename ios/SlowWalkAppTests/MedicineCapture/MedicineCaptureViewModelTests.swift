@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import Foundation
 import os
@@ -16,14 +17,21 @@ private actor FakeCameraCaptureService: CameraCaptureServicing {
     private var pending: [UUID: Pending] = [:]
     private var captureStartedWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
     private var pendingRequestIDWaiters: [CheckedContinuation<UUID, Never>] = []
+    private var startWaiters: [(
+        count: Int, continuation: CheckedContinuation<Void, Never>
+    )] = []
     private var activeSessionID: UUID?
     private(set) var startIDs: [UUID] = []
     private(set) var stopIDs: [UUID] = []
     private(set) var cancelledIDs: [UUID] = []
+    private(set) var captureIDs: [UUID] = []
 
     func start(sessionID: UUID) async throws {
         activeSessionID = sessionID
         startIDs.append(sessionID)
+        let waiters = startWaiters.filter { $0.count <= startIDs.count }
+        startWaiters.removeAll { $0.count <= startIDs.count }
+        for waiter in waiters { waiter.continuation.resume() }
     }
 
     func stop(sessionID: UUID) async {
@@ -34,10 +42,20 @@ private actor FakeCameraCaptureService: CameraCaptureServicing {
 
     func currentSessionID() -> UUID? { activeSessionID }
 
+    func waitUntilStarted() async { await waitUntilStartCount(1) }
+
+    func waitUntilStartCount(_ count: Int) async {
+        if startIDs.count >= count { return }
+        await withCheckedContinuation {
+            startWaiters.append((count: count, continuation: $0))
+        }
+    }
+
     func capturePhoto(
         requestID: UUID, orientation: OCRImageOrientation, capturedAt: Date
     ) async throws -> CameraCaptureResult {
         return try await withCheckedThrowingContinuation { continuation in
+            captureIDs.append(requestID)
             pending[requestID] = Pending(
                 requestID: requestID, continuation: continuation
             )
@@ -86,6 +104,44 @@ private actor FakeCameraCaptureService: CameraCaptureServicing {
                 capturedAt: Date(timeIntervalSince1970: 100)
             )
         )
+    }
+}
+
+@MainActor
+private final class ControllableCameraPermissionProvider:
+    CameraPermissionProviding
+{
+    var authorizationState: AVAuthorizationStatus
+    var isCameraAvailable: Bool
+    private(set) var requestCount = 0
+    private var result = false
+    private let requestGate = CaptureGate()
+
+    init(
+        state: AVAuthorizationStatus,
+        isCameraAvailable: Bool = true
+    ) {
+        authorizationState = state
+        self.isCameraAvailable = isCameraAvailable
+    }
+
+    func requestAccess() async -> Bool {
+        requestCount += 1
+        await requestGate.wait()
+        return result
+    }
+
+    func waitUntilRequested() async {
+        await requestGate.waitUntilEntered()
+    }
+
+    func resolve(
+        _ granted: Bool,
+        state: AVAuthorizationStatus
+    ) {
+        authorizationState = state
+        result = granted
+        requestGate.open()
     }
 }
 
@@ -199,6 +255,21 @@ private func waitForSubmission(
     return false
 }
 
+@MainActor
+private func waitForRecognitionResult(
+    _ viewModel: MedicineCaptureViewModel
+) async -> MedicineCaptureState {
+    for await state in viewModel.$state.values {
+        switch state {
+        case .success, .noTextFound, .recognitionFailed, .cancelled:
+            return state
+        default:
+            continue
+        }
+    }
+    return viewModel.state
+}
+
 // MARK: - Tests
 
 @Suite("MedicineCaptureViewModel")
@@ -289,6 +360,7 @@ struct MedicineCaptureViewModelTests {
             processor: processor, captureService: camera
         )
 
+        try await vm.startSession()
         vm.capturePhoto()
         let requestID = await camera.nextPendingRequestID()
         await camera.complete(requestID: requestID, data: img("camera"))
@@ -670,23 +742,186 @@ struct MedicineCaptureViewModelTests {
         #expect(spy.callCount == 0)
     }
 
-    // MARK: - Permission
+    // MARK: - Device demo hardening
 
-    @Test func permissionFlow() {
-        let vm = MedicineCaptureViewModel(
-            recognizer: SpyRecognizer { _ in [] }
+    @Test func notDeterminedRapidTapRequestsOnceAndStartsOnce() async {
+        let permission = ControllableCameraPermissionProvider(
+            state: .notDetermined
         )
-        vm.requestPermission()
+        let camera = FakeCameraCaptureService()
+        let vm = MedicineCaptureViewModel(
+            recognizer: SpyRecognizer { _ in [] },
+            captureService: camera,
+            permissionProvider: permission
+        )
+        #expect(vm.beginCameraPresentation())
+        #expect(vm.beginCameraPresentation() == false)
+        await permission.waitUntilRequested()
+        #expect(permission.requestCount == 1)
         #expect(vm.state == .requestingPermission)
-        vm.setPermissionAuthorized(true)
+        permission.resolve(true, state: .authorized)
+        await camera.waitUntilStarted()
+        #expect(await camera.startIDs.count == 1)
         #expect(vm.state == .ready)
     }
 
-    @Test func photoLoadingFailedSetsCorrectState() {
-        let vm = MedicineCaptureViewModel(
-            recognizer: SpyRecognizer { _ in [] }
+    @Test func authorizedCameraDoesNotReopenAndRapidShutterSubmitsOnce()
+        async throws
+    {
+        let permission = ControllableCameraPermissionProvider(
+            state: .authorized
         )
-        vm.setPhotoLoadingFailed()
-        #expect(vm.state == .recognitionFailed("photo_loading_failed"))
+        let camera = FakeCameraCaptureService()
+        let recognizer = SpyRecognizer { _ in [makeObs()] }
+        let vm = MedicineCaptureViewModel(
+            recognizer: recognizer,
+            captureService: camera,
+            permissionProvider: permission
+        )
+        #expect(vm.beginCameraPresentation())
+        #expect(vm.beginCameraPresentation() == false)
+        await camera.waitUntilStarted()
+        #expect(permission.requestCount == 0)
+        #expect(await camera.startIDs.count == 1)
+        #expect(vm.state == .ready)
+        await vm.appDidEnterBackground()
+        #expect(await camera.stopIDs.count == 1)
+        vm.appDidBecomeActive()
+        #expect(await camera.startIDs.count == 1)
+        #expect(vm.beginCameraPresentation())
+        await camera.waitUntilStartCount(2)
+        vm.capturePhoto()
+        vm.capturePhoto()
+        let requestID = await camera.nextPendingRequestID()
+        #expect(await camera.captureIDs == [requestID])
+        await camera.complete(requestID: requestID, data: img("camera"))
+        _ = await waitForRecognitionResult(vm)
+        #expect(recognizer.callCount == 1)
+    }
+
+    @Test func blockedCameraStatesNeverRequestOrStartAndKeepPhotos() async {
+        let scenarios: [(
+            authorization: AVAuthorizationStatus,
+            available: Bool,
+            expected: MedicineCaptureState
+        )] = [
+            (.denied, true, .permissionDenied),
+            (.restricted, true, .cameraRestricted),
+            (.authorized, false, .cameraUnavailable),
+        ]
+        for scenario in scenarios {
+            let permission = ControllableCameraPermissionProvider(
+                state: scenario.authorization,
+                isCameraAvailable: scenario.available
+            )
+            let camera = FakeCameraCaptureService()
+            let vm = MedicineCaptureViewModel(
+                recognizer: SpyRecognizer { _ in [] },
+                captureService: camera,
+                permissionProvider: permission
+            )
+            #expect(vm.beginCameraPresentation())
+            #expect(vm.state == scenario.expected)
+            #expect(vm.beginCameraPresentation() == false)
+            #expect(permission.requestCount == 0)
+            #expect(await camera.startIDs.isEmpty)
+            #expect(vm.beginPhotosPickerPresentation())
+            #expect(vm.beginPhotosPickerPresentation() == false)
+            vm.endPhotosPickerPresentation()
+            if scenario.authorization == .denied {
+                permission.authorizationState = .authorized
+                vm.appDidBecomeActive()
+                #expect(vm.state == .idle)
+            }
+        }
+    }
+
+    @Test func photoInputLockAndRetryUseDistinctLifecycles() async throws {
+        let processGate = CaptureGate()
+        let firstData = img("first")
+        let processor = SpyCaptureProcessor { input in
+            if input.data == firstData {
+                await processGate.wait()
+                throw MedicineCaptureProcessingFailure.processingFailed
+            }
+            return .recognized([makeObs()])
+        }
+        let vm = MedicineCaptureViewModel(processor: processor)
+        let oldLoadID = try #require(vm.beginPhotoLoading())
+        #expect(vm.submitLoadedPhoto(
+            loadID: oldLoadID,
+            imageData: firstData,
+            orientation: .up,
+            capturedAt: Date(timeIntervalSince1970: 100)
+        ))
+        #expect(vm.submitLoadedPhoto(
+            loadID: oldLoadID,
+            imageData: firstData,
+            orientation: .up,
+            capturedAt: Date(timeIntervalSince1970: 100)
+        ) == false)
+        await processGate.waitUntilEntered()
+        #expect(vm.beginPhotosPickerPresentation() == false)
+        #expect(vm.beginCameraPresentation() == false)
+        vm.capturePhoto()
+        #expect(processor.inputs.count == 1)
+        processGate.open()
+        #expect(await waitForRecognitionResult(vm)
+            == .recognitionFailed("processing_failed"))
+        vm.reset()
+        let currentLoadID = try #require(vm.beginPhotoLoading())
+        #expect(currentLoadID != oldLoadID)
+        #expect(vm.submitLoadedPhoto(
+            loadID: oldLoadID,
+            imageData: img("stale"),
+            orientation: .up,
+            capturedAt: Date(timeIntervalSince1970: 100)
+        ) == false)
+        #expect(vm.submitLoadedPhoto(
+            loadID: currentLoadID,
+            imageData: img("current"),
+            orientation: .up,
+            capturedAt: Date(timeIntervalSince1970: 200)
+        ))
+        _ = await waitForRecognitionResult(vm)
+        #expect(processor.inputs.map(\.data) == [firstData, img("current")])
+    }
+
+    @Test func backgroundKeepsOneProcessingAndAcceptedHandoffIsNotStopped()
+        async throws
+    {
+        let processGate = CaptureGate()
+        let processor = SpyCaptureProcessor { _ in
+            await processGate.wait()
+            return .submittedForAssessment
+        }
+        var acceptedCount = 0
+        let vm = MedicineCaptureViewModel(
+            processor: processor,
+            onAssessmentSubmissionAccepted: { acceptedCount += 1 }
+        )
+        let loadID = try #require(vm.beginPhotoLoading())
+        #expect(vm.submitLoadedPhoto(
+            loadID: loadID,
+            imageData: img("background"),
+            orientation: .up,
+            capturedAt: Date(timeIntervalSince1970: 100)
+        ))
+        await processGate.waitUntilEntered()
+        await vm.appDidEnterBackground()
+        guard case .recognizing = vm.state else {
+            Issue.record("background must preserve processing")
+            return
+        }
+        vm.appDidBecomeActive()
+        #expect(vm.beginPhotosPickerPresentation() == false)
+        #expect(processor.inputs.count == 1)
+        #expect(processor.cancelCallCount == 0)
+        processGate.open()
+        #expect(await waitForSubmission(vm))
+        await vm.dismiss()
+        #expect(processor.inputs.count == 1)
+        #expect(processor.cancelCallCount == 0)
+        #expect(acceptedCount == 1)
     }
 }

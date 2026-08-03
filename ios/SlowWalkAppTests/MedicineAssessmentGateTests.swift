@@ -415,7 +415,7 @@ struct MedicineAssessmentGateTests {
     }
 
     @Test func medicineCaptureCopyContainsNoASCIIEnglishText() {
-        #expect(MedicineCaptureCopy.allUserVisibleText.count == 16)
+        #expect(MedicineCaptureCopy.allUserVisibleText.count == 22)
         #expect(
             MedicineCaptureCopy.allUserVisibleText.allSatisfy { text in
                 text.unicodeScalars.allSatisfy { scalar in

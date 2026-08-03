@@ -872,6 +872,7 @@ struct MedicineAssessmentRunnerTests {
             onAssessmentSubmissionAccepted: { closed.signal() }
         )
 
+        try await viewModel.startSession()
         viewModel.capturePhoto()
         await closed.wait()
         await backend.waitForAssessments(1)
