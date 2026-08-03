@@ -426,6 +426,37 @@ struct MedicineAssessmentGateTests {
         )
     }
 
+    @Test func medicineCaptureControlsPreservePhotoLibraryFallback() {
+        #expect(MedicineCaptureControlState(
+            captureState: .permissionDenied,
+            submissionStatus: .none
+        ) == .photoLibraryOnly)
+        #expect(MedicineCaptureControlState(
+            captureState: .cameraUnavailable,
+            submissionStatus: .none
+        ) == .photoLibraryOnly)
+        #expect(MedicineCaptureControlState(
+            captureState: .idle,
+            submissionStatus: .none
+        ) == .captureAndPhotoLibrary)
+        #expect(MedicineCaptureControlState(
+            captureState: .ready,
+            submissionStatus: .none
+        ) == .captureAndPhotoLibrary)
+        #expect(MedicineCaptureControlState(
+            captureState: .recognizing(generation: 1),
+            submissionStatus: .none
+        ) == .cancel)
+        #expect(MedicineCaptureControlState(
+            captureState: .ready,
+            submissionStatus: .submitted
+        ) == .none)
+        #expect(MedicineCaptureControlState(
+            captureState: .ready,
+            submissionStatus: .failed(.assessmentGateUnavailable)
+        ) == .retry)
+    }
+
     /// A confirmation may only ever land at the assessment gate.
     ///
     /// This is requirement 1 stated where it is decided: whatever state a

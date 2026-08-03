@@ -29,6 +29,43 @@ enum MedicineCaptureCopy {
     ]
 }
 
+enum MedicineCaptureControlState: Equatable {
+    case captureAndPhotoLibrary
+    case photoLibraryOnly
+    case cancel
+    case retry
+    case none
+
+    init(
+        captureState: MedicineCaptureState,
+        submissionStatus: MedicineAssessmentSubmissionStatus
+    ) {
+        switch submissionStatus {
+        case .submitted:
+            self = .none
+            return
+        case .failed:
+            self = .retry
+            return
+        case .none:
+            break
+        }
+
+        switch captureState {
+        case .idle, .ready:
+            self = .captureAndPhotoLibrary
+        case .permissionDenied, .cameraUnavailable:
+            self = .photoLibraryOnly
+        case .capturing, .recognizing:
+            self = .cancel
+        case .success, .noTextFound, .recognitionFailed, .cancelled:
+            self = .retry
+        case .requestingPermission:
+            self = .none
+        }
+    }
+}
+
 private final class CameraPreviewView: UIView {
     override func layoutSubviews() {
         super.layoutSubviews()
@@ -138,19 +175,21 @@ struct MedicineCaptureView: View {
         VStack {
             Spacer()
             HStack(spacing: 24) {
-                if case .failed = viewModel.assessmentSubmissionStatus {
+                switch MedicineCaptureControlState(
+                    captureState: viewModel.state,
+                    submissionStatus: viewModel.assessmentSubmissionStatus
+                ) {
+                case .captureAndPhotoLibrary:
+                    captureButton
+                    photosPickerButton
+                case .photoLibraryOnly:
+                    photosPickerButton
+                case .cancel:
+                    cancelButton
+                case .retry:
                     retryButton
-                } else {
-                    switch viewModel.state {
-                    case .ready, .idle:
-                        captureButton; photosPickerButton
-                    case .capturing, .recognizing:
-                        cancelButton
-                    case .success, .noTextFound,
-                         .recognitionFailed, .cancelled:
-                        retryButton
-                    default: EmptyView()
-                    }
+                case .none:
+                    EmptyView()
                 }
             }.padding(.bottom, 40)
         }
