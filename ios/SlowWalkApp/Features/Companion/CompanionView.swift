@@ -11,6 +11,8 @@ import SwiftUI
 /// follow underneath.
 struct CompanionView: View {
     @Environment(AppEnvironment.self) private var environment
+    @State private var isMedicineCapturePresented = false
+    @State private var medicineCaptureViewModel: MedicineCaptureViewModel?
     private let sessionOverride: CompanionSessionModel?
 
     init(session: CompanionSessionModel? = nil) {
@@ -23,6 +25,22 @@ struct CompanionView: View {
 
     var body: some View {
         rootContent
+            .fullScreenCover(
+                isPresented: $isMedicineCapturePresented,
+                onDismiss: { medicineCaptureViewModel = nil }
+            ) {
+                if let medicineCaptureViewModel {
+                    MedicineCaptureView(viewModel: medicineCaptureViewModel)
+                }
+            }
+            .onChange(of: session.currentAssessmentGateLease) {
+                oldLease, newLease in
+                guard isMedicineCapturePresented,
+                      oldLease != nil,
+                      oldLease != newLease
+                else { return }
+                isMedicineCapturePresented = false
+            }
     }
 
     @ViewBuilder
@@ -90,7 +108,7 @@ struct CompanionView: View {
             MedicineAssessmentView(
                 state: displayState,
                 retryAction: {
-                    session.retakeMedicinePhoto()
+                    presentMedicineCapture()
                 },
                 confirmAction: assessmentCandidateConfirmationAction
             )
@@ -103,7 +121,7 @@ struct CompanionView: View {
             MedicineAssessmentView(
                 state: displayState,
                 retryAction: {
-                    session.retakeMedicinePhoto()
+                    presentMedicineCapture()
                 },
                 confirmAction: assessmentCandidateConfirmationAction
             )
@@ -129,7 +147,7 @@ struct CompanionView: View {
 
             if presentationShowsRetry(for: gate.assessmentState) == false {
                 secondaryButton(CompanionCopy.retryPhotoTitle) {
-                    session.retakeMedicinePhoto()
+                    presentMedicineCapture()
                 }
             }
 
@@ -347,6 +365,7 @@ struct CompanionView: View {
             ForEach(prompt.candidates) { candidate in
                 Button {
                     session.confirmMedicine(candidate)
+                    presentMedicineCapture()
                 } label: {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(candidate.displayName)
@@ -370,6 +389,18 @@ struct CompanionView: View {
                 session.retakeMedicinePhoto()
             }
         }
+    }
+
+    private func presentMedicineCapture() {
+        guard case .awaitingMedicineAssessment = session.state,
+              session.currentAssessmentGateLease != nil,
+              !isMedicineCapturePresented
+        else { return }
+
+        medicineCaptureViewModel = environment.makeMedicineCaptureViewModel {
+            isMedicineCapturePresented = false
+        }
+        isMedicineCapturePresented = true
     }
 
     private var completedControls: some View {

@@ -49,7 +49,7 @@ final class MedicineAssessmentCaptureSubmitter: MedicineCaptureProcessing {
                         .assessmentGateUnavailable
                 }
 
-                let accepted = await runner.start(invocation)
+                let accepted = await runner.submit(invocation)
                 try Task.checkCancellation()
                 guard accepted else {
                     throw MedicineCaptureProcessingFailure

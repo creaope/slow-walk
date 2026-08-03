@@ -28,7 +28,6 @@ final class MedicineAssessmentRunner {
         let gateLease: MedicineAssessmentGateLease
         var expectedGeneration: UInt64?
         var confirmationSourceUpdate: MedicineAssessmentStateUpdate?
-        var didEnterAssessmentLifecycle = false
 
         init(
             requestID: UUID,
@@ -43,6 +42,34 @@ final class MedicineAssessmentRunner {
 
     private final class StoppingBarrier {
         var task: Task<Void, Never>?
+    }
+
+    private final class StartAcceptance {
+        private var result: Bool?
+        private var continuation: CheckedContinuation<Bool, Never>?
+
+        func wait() async -> Bool {
+            if let result { return result }
+            return await withCheckedContinuation { continuation in
+                if let result {
+                    continuation.resume(returning: result)
+                } else {
+                    self.continuation = continuation
+                }
+            }
+        }
+
+        func resolve(_ accepted: Bool) {
+            guard result == nil else { return }
+            result = accepted
+            continuation?.resume(returning: accepted)
+            continuation = nil
+        }
+    }
+
+    private struct StartedAssessment {
+        let acceptance: StartAcceptance
+        let task: Task<Void, Never>
     }
 
     private let coordinator: MedicineAssessmentCoordinator
@@ -101,13 +128,34 @@ final class MedicineAssessmentRunner {
 
     @discardableResult
     func start(_ invocation: AssessmentInvocation?) async -> Bool {
+        guard let started = await beginAssessment(invocation) else {
+            return false
+        }
+        let accepted = await started.acceptance.wait()
+        await started.task.value
+        return accepted
+    }
+
+    /// Returns as soon as the invocation owns the canonical generation. The
+    /// assessment continues on `lifecycleTail` and remains owned by this runner.
+    @discardableResult
+    func submit(_ invocation: AssessmentInvocation?) async -> Bool {
+        guard let started = await beginAssessment(invocation) else {
+            return false
+        }
+        return await started.acceptance.wait()
+    }
+
+    private func beginAssessment(
+        _ invocation: AssessmentInvocation?
+    ) async -> StartedAssessment? {
         guard let invocation,
               isCurrentAssessmentGate(invocation.gateLease)
-        else { return false }
+        else { return nil }
         await waitForStoppingBarrier()
 
         guard isCurrentAssessmentGate(invocation.gateLease) else {
-            return false
+            return nil
         }
         let context = AssessmentContext(
             requestID: UUID(),
@@ -117,8 +165,10 @@ final class MedicineAssessmentRunner {
         let predecessor = lifecycleTail
         predecessor?.cancel()
         let coordinator = coordinator
+        let acceptance = StartAcceptance()
 
         let task = Task { @MainActor [weak self, coordinator] in
+            defer { acceptance.resolve(false) }
             await predecessor?.value
             guard !Task.isCancelled,
                   self?.isActive(context, for: invocation.gateLease) == true
@@ -147,7 +197,7 @@ final class MedicineAssessmentRunner {
                 return
             }
 
-            context.didEnterAssessmentLifecycle = true
+            acceptance.resolve(true)
             _ = await coordinator.assess(
                 imageInput: invocation.imageInput,
                 userProfile: invocation.userProfile,
@@ -156,8 +206,7 @@ final class MedicineAssessmentRunner {
             )
         }
         lifecycleTail = task
-        await task.value
-        return context.didEnterAssessmentLifecycle
+        return StartedAssessment(acceptance: acceptance, task: task)
     }
 
     /// Confirms an exact candidate from the current canonical response.

@@ -637,7 +637,7 @@ struct MedicineCaptureViewModelTests {
 
     // MARK: - Superseded image input drops old OCR result
 
-    @Test func supersededImageInputDropsOldOCRResult() async {
+    @Test func supersededImageInputBeforeProcessingOnlyRunsLatestOCR() async {
         let spy = SpyRecognizer { _ in [makeObs("latest")] }
         let vm = MedicineCaptureViewModel(recognizer: spy)
         vm.capture(imageData: img("first"), orientation: .up,
@@ -646,7 +646,7 @@ struct MedicineCaptureViewModelTests {
                    capturedAt: Date(timeIntervalSince1970: 200))
         while case .recognizing = vm.state { await Task.yield() }
         guard case .success = vm.state else { return }
-        #expect(spy.callCount == 2)
+        #expect(spy.callCount == 1)
     }
 
     // MARK: - Dismiss drops in-flight OCR result

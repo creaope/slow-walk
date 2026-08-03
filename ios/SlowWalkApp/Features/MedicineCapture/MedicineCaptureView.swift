@@ -25,6 +25,7 @@ private struct CameraPreview: UIViewRepresentable {
 }
 
 struct MedicineCaptureView: View {
+    @Environment(\.dismiss) private var dismiss
     @StateObject private var viewModel: MedicineCaptureViewModel
     @State private var photosPickerItem: PhotosPickerItem?
     @State private var isSessionStarted = false
@@ -40,6 +41,10 @@ struct MedicineCaptureView: View {
             backgroundView
             overlayView
             controlsView
+        }
+        .overlay(alignment: .topTrailing) {
+            closeButton
+                .padding(20)
         }
         .task { await setupSession() }
         .onDisappear {
@@ -64,7 +69,12 @@ struct MedicineCaptureView: View {
     }
 
     @ViewBuilder private var overlayView: some View {
-        Group {
+        if case .failed = viewModel.assessmentSubmissionStatus {
+            statusOverlay(
+                icon: "exclamationmark.triangle.fill",
+                text: "Unable to start the medicine assessment. Try again."
+            )
+        } else {
             switch viewModel.state {
             case .idle:
                 statusOverlay(icon: "camera.fill",
@@ -79,7 +89,7 @@ struct MedicineCaptureView: View {
             case .capturing:
                 statusOverlay(icon: nil, text: "Capturing\u{2026}")
             case .recognizing:
-                statusOverlay(icon: nil, text: "Recognizing text\u{2026}")
+                statusOverlay(icon: nil, text: "Processing medicine image\u{2026}")
             case .success(let observations):
                 successPanel(observations)
             case .noTextFound:
@@ -101,15 +111,19 @@ struct MedicineCaptureView: View {
         VStack {
             Spacer()
             HStack(spacing: 24) {
-                switch viewModel.state {
-                case .ready, .idle:
-                    captureButton; photosPickerButton
-                case .capturing, .recognizing:
-                    cancelButton
-                case .success, .noTextFound,
-                     .recognitionFailed, .cancelled:
+                if case .failed = viewModel.assessmentSubmissionStatus {
                     retryButton
-                default: EmptyView()
+                } else {
+                    switch viewModel.state {
+                    case .ready, .idle:
+                        captureButton; photosPickerButton
+                    case .capturing, .recognizing:
+                        cancelButton
+                    case .success, .noTextFound,
+                         .recognitionFailed, .cancelled:
+                        retryButton
+                    default: EmptyView()
+                    }
                 }
             }.padding(.bottom, 40)
         }
@@ -152,6 +166,18 @@ struct MedicineCaptureView: View {
         }
     }
 
+    private var closeButton: some View {
+        Button(action: closeCapture) {
+            Image(systemName: "xmark")
+                .font(.headline)
+                .foregroundColor(.white)
+                .frame(width: 44, height: 44)
+                .background(Color.black.opacity(0.45))
+                .clipShape(Circle())
+        }
+        .accessibilityLabel("Close medicine capture")
+    }
+
     private func beginCameraCapture() {
         photoLoadTask?.cancel()
         photoLoadTask = nil
@@ -164,6 +190,11 @@ struct MedicineCaptureView: View {
         photoLoadTask = nil
         photoLoadGeneration &+= 1
         viewModel.cancel()
+    }
+
+    private func closeCapture() {
+        cancelCurrentOperation()
+        dismiss()
     }
 
     private func statusOverlay(icon: String?, text: String) -> some View {

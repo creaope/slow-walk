@@ -80,6 +80,7 @@ struct MedicineAssessmentRunnerTests {
             capturedAt: input.capturedAt
         )
         #expect(await waitForCaptureSubmission(viewModel))
+        await backend.waitForAssessments(1)
 
         #expect(await recognizer.callCount == 1)
         #expect(await recognizer.inputs == [input])
@@ -160,7 +161,7 @@ struct MedicineAssessmentRunnerTests {
         #expect(await recognizer.callCount == 1)
     }
 
-    @Test func cancelledSubmitterJoinsRunnerStopBeforeReturning() async throws {
+    @Test func explicitSubmitterCancelJoinsRunnerStopBeforeReturning() async throws {
         let backend = ControlledMedicineBackend(
             plans: [.resolved, .resolved], blockedAssessmentCalls: [1]
         )
@@ -170,27 +171,21 @@ struct MedicineAssessmentRunnerTests {
             userHealthProfileProvider: { RunnerFixtures.profile },
             medicationRecordsProvider: { [] }
         )
-        let submission = Task {
+        #expect(
             try await submitter.process(RunnerFixtures.image)
-        }
+                == .submittedForAssessment
+        )
         await backend.waitForAssessments(1)
 
-        submission.cancel()
+        let cancellation = Task { await submitter.cancel() }
         await backend.releaseAssessment(1)
-        let result = await submission.result
-
-        guard case .failure(let error) = result,
-              let failure = error as? MedicineCaptureProcessingFailure
-        else {
-            Issue.record("expected stable cancellation failure")
-            return
-        }
-        #expect(failure == .cancelled)
+        await cancellation.value
         #expect(await backend.completedAssessmentCount == 1)
         #expect(
             try await submitter.process(RunnerFixtures.image)
                 == .submittedForAssessment
         )
+        await backend.waitForAssessments(2)
         #expect(await backend.completedAssessmentCount == 2)
     }
 
@@ -246,24 +241,23 @@ struct MedicineAssessmentRunnerTests {
     }
 
     @Test func stopReturnsOnlyAfterCoordinatorResetIsPublished() async throws {
-        let backend = ControlledMedicineBackend(plans: [.resolved])
-        let (runner, _) = try await makeRunner(backend: backend)
+        let backend = ControlledMedicineBackend(plans: [.resolved, .resolved])
+        let (runner, session) = try await makeRunner(backend: backend)
         await runner.start(try makeAssessmentInvocation(runner))
-        let coordinator = try runnerCoordinator(runner)
+        #expect(await waitForGate(session, state: .result))
 
         await runner.stop()
+        #expect(await runner.start(try makeAssessmentInvocation(runner)))
+        #expect(await waitForGate(session, state: .result))
 
-        let update = await coordinator.currentStateUpdate
-        #expect(update.sequenceNumber == 3)
-        #expect(update.state == .idle)
+        #expect(session.assessmentGate?.latestUpdate?.sequenceNumber == 5)
     }
 
     @Test func consecutiveStopsShareOneStoppingBarrierAndOneReset() async throws {
         let backend = ControlledMedicineBackend(
-            plans: [.resolved], blockedAssessmentCalls: [1]
+            plans: [.resolved, .resolved], blockedAssessmentCalls: [1]
         )
-        let (runner, _) = try await makeRunner(backend: backend)
-        let coordinator = try runnerCoordinator(runner)
+        let (runner, session) = try await makeRunner(backend: backend)
         let invocation = try makeAssessmentInvocation(runner)
         let start = Task { await runner.start(invocation) }
         await backend.waitForAssessments(1)
@@ -275,9 +269,9 @@ struct MedicineAssessmentRunnerTests {
         _ = await (firstStop, secondStop)
         _ = await start.value
 
-        let update = await coordinator.currentStateUpdate
-        #expect(update.sequenceNumber == 3)
-        #expect(update.state == .idle)
+        #expect(await runner.start(try makeAssessmentInvocation(runner)))
+        #expect(await waitForGate(session, state: .result))
+        #expect(session.assessmentGate?.latestUpdate?.sequenceNumber == 5)
     }
 
     @Test func startDuringStopWaitsForBarrierBeforeResetAndAssessment()
@@ -322,6 +316,7 @@ struct MedicineAssessmentRunnerTests {
 
         let requests = await backend.requests
         #expect(requests.count == 2)
+        #expect(await waitForGate(session, state: .result))
         guard requests.count == 2 else { return }
         guard case .result(let result) = session.assessmentGate?.assessmentState else {
             Issue.record("Expected the replacement result.")
@@ -347,22 +342,6 @@ struct MedicineAssessmentRunnerTests {
 
         #expect(session.assessmentGate?.latestUpdate?.sequenceNumber == 4)
         #expect(session.assessmentGate?.assessmentState.isResult == true)
-    }
-
-    @Test func updateAboveExpectedGenerationIsRejectedRatherThanAdopted()
-        async throws
-    {
-        let backend = ControlledMedicineBackend(plans: [.resolved])
-        let (runner, session) = try await makeRunner(backend: backend)
-        await runner.start(try makeAssessmentInvocation(runner))
-        #expect(await waitForGate(session, state: .result))
-        let accepted = session.assessmentGate?.latestUpdate
-        let coordinator = try runnerCoordinator(runner)
-
-        await coordinator.reset()
-        await repeatedlyYield()
-
-        #expect(session.assessmentGate?.latestUpdate == accepted)
     }
 
     @Test func mismatchedResponseRequestIDIsRejected() async throws {
@@ -706,37 +685,245 @@ struct MedicineAssessmentRunnerTests {
         try await verifyValidQueuedStart(rejectTransition: true)
     }
 
-    @Test func runnerPrivatelyOwnsARealMedicineAssessmentCoordinator()
-        async throws
-    {
-        let backend = ControlledMedicineBackend(plans: [.resolved])
-        let (runner, _) = try await makeRunner(backend: backend)
-        let ownedCoordinator = Mirror(reflecting: runner).children.first {
-            $0.label == "coordinator"
-        }?.value
-
-        #expect(ownedCoordinator is MedicineAssessmentCoordinator)
-    }
-
-    @Test func appEnvironmentOwnsExactlyOneMedicineAssessmentRunner() {
+    @Test func appEnvironmentReturnsItsSingleStableMedicineAssessmentRunner() {
         let environment = AppEnvironment(
             clock: AppFixedClock(fixedDate: RunnerFixtures.date)
         )
-        let runners = Mirror(reflecting: environment).children.filter {
-            $0.value is MedicineAssessmentRunner
-        }
-        let ownedRunner = runners.first?.value as? MedicineAssessmentRunner
 
-        #expect(runners.count == 1)
-        #expect(ownedRunner === environment.medicineAssessmentRunner)
+        #expect(
+            environment.medicineAssessmentRunner
+                === environment.medicineAssessmentRunner
+        )
+        #expect(
+            environment.medicineCaptureSubmitter
+                === environment.medicineCaptureSubmitter
+        )
+        #expect(
+            environment.currentUserHealthProfile.id.uuidString
+                == "10000000-0000-0000-0000-000000000001"
+        )
+        #expect(environment.currentUserHealthProfile.age == 72)
+        #expect(environment.currentMedicationRecords.isEmpty)
     }
 
-    @Test func companionSessionDoesNotHoldCoordinator() async {
-        let (session, _) = await sessionAtAssessmentGate()
+    @Test func productionPhotoHandoffClosesBeforeCanonicalResultAndDoesNotStopIt()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(
+            plans: [.resolved], blockedAssessmentCalls: [1]
+        )
+        let recognizer = CountingMedicineRecognizer()
+        let record = RunnerFixtures.medicationRecord
+        let environment = makeProductionEnvironment(
+            backend: backend,
+            recognizer: recognizer,
+            medicationRecords: [record]
+        )
+        try await enterProductionAssessmentGate(environment.companion)
+        let closed = MainActorSignal()
+        let viewModel = environment.makeMedicineCaptureViewModel {
+            closed.signal()
+        }
+        let input = OCRImageInput(
+            data: Data("production-photo".utf8),
+            orientation: .downMirrored,
+            capturedAt: RunnerFixtures.date
+        )
 
-        #expect(Mirror(reflecting: session).children.contains {
-            $0.value is MedicineAssessmentCoordinator
+        viewModel.capture(
+            imageData: input.data,
+            orientation: input.orientation,
+            capturedAt: input.capturedAt
+        )
+        await closed.wait()
+        await backend.waitForAssessments(1)
+
+        #expect(viewModel.assessmentSubmissionStatus == .submitted)
+        #expect(closed.count == 1)
+        #expect(await recognizer.callCount == 1)
+        #expect(await recognizer.inputs == [input])
+        #expect(await backend.requests.first?.userProfile.id == RunnerFixtures.profile.id)
+        #expect(await backend.requests.first?.recentRecords.map(\.id) == [record.id])
+        guard case let .awaitingMedicineAssessment(gate) = environment.companion.state else {
+            Issue.record("accepted handoff must reveal the canonical assessment page")
+            return
+        }
+        #expect(gate.assessmentState.isResult == false)
+        #expect(environment.companion.canDepart == false)
+        #expect(environment.companion.canCompleteMedicineCheck == false)
+        #expect(environment.careRecords.events.contains { event in
+            if case .careActionShown = event.kind { return true }
+            return false
         } == false)
+
+        await viewModel.dismiss()
+        await viewModel.dismiss()
+        #expect(await backend.completedAssessmentCount == 0)
+
+        await backend.releaseAssessment(1)
+        await environment.medicineAssessmentRunner.stop()
+    }
+
+    @Test func productionCameraUsesTheSameCanonicalSubmitterAndOneOCR()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(
+            plans: [.resolved], blockedAssessmentCalls: [1]
+        )
+        let recognizer = CountingMedicineRecognizer()
+        let environment = makeProductionEnvironment(
+            backend: backend, recognizer: recognizer
+        )
+        try await enterProductionAssessmentGate(environment.companion)
+        let closed = MainActorSignal()
+        let cameraInput = OCRImageInput(
+            data: Data("production-camera".utf8),
+            orientation: .left,
+            capturedAt: RunnerFixtures.date
+        )
+        let camera = ImmediateCameraCaptureService(input: cameraInput)
+        let viewModel = environment.makeMedicineCaptureViewModel(
+            captureService: camera,
+            onAssessmentSubmissionAccepted: { closed.signal() }
+        )
+
+        viewModel.capturePhoto()
+        await closed.wait()
+        await backend.waitForAssessments(1)
+
+        #expect(await recognizer.callCount == 1)
+        #expect(await recognizer.inputs == [cameraInput])
+        #expect(await backend.requests.count == 1)
+        #expect(closed.count == 1)
+
+        await viewModel.dismiss()
+        await backend.releaseAssessment(1)
+        await environment.medicineAssessmentRunner.stop()
+    }
+
+    @Test func productionGateRejectionKeepsCaptureOpenWithStableFailure()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(plans: [.resolved])
+        let recognizer = CountingMedicineRecognizer()
+        let environment = makeProductionEnvironment(
+            backend: backend, recognizer: recognizer
+        )
+        try await enterProductionAssessmentGate(environment.companion)
+        environment.companion.reconsiderMedicineChoice()
+        let closed = MainActorSignal()
+        let viewModel = environment.makeMedicineCaptureViewModel {
+            closed.signal()
+        }
+
+        viewModel.capture(
+            imageData: Data("rejected".utf8),
+            orientation: .up,
+            capturedAt: RunnerFixtures.date
+        )
+        let failure = await captureFailure(from: viewModel)
+
+        #expect(failure == .assessmentGateUnavailable)
+        #expect(closed.count == 0)
+        #expect(await recognizer.callCount == 0)
+        #expect(await backend.requests.isEmpty)
+        guard case .recognizing = viewModel.state else {
+            Issue.record("submission rejection must not publish capture success")
+            return
+        }
+
+        await viewModel.dismiss()
+    }
+
+    @Test func productionReplacementJoinsOldOCRAndOnlyLatestInputCloses()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(
+            plans: [.resolved, .resolved], blockedAssessmentCalls: [1, 2]
+        )
+        let recognizer = CountingMedicineRecognizer()
+        let environment = makeProductionEnvironment(
+            backend: backend, recognizer: recognizer
+        )
+        try await enterProductionAssessmentGate(environment.companion)
+        let activeInvocation = try #require(
+            environment.medicineAssessmentRunner.makeAssessmentInvocation(
+                imageInput: RunnerFixtures.image,
+                userProfile: RunnerFixtures.profile
+            )
+        )
+        let active = Task {
+            await environment.medicineAssessmentRunner.start(activeInvocation)
+        }
+        await backend.waitForAssessments(1)
+        let closed = MainActorSignal()
+        let viewModel = environment.makeMedicineCaptureViewModel {
+            closed.signal()
+        }
+
+        viewModel.capture(
+            imageData: Data("old".utf8), orientation: .up,
+            capturedAt: RunnerFixtures.date
+        )
+        viewModel.capture(
+            imageData: Data("latest".utf8), orientation: .right,
+            capturedAt: RunnerFixtures.date
+        )
+        await backend.releaseAssessment(1)
+        _ = await active.value
+        await closed.wait()
+        await backend.waitForAssessments(2)
+
+        #expect(await recognizer.callCount == 2)
+        #expect(await recognizer.inputs.map(\.data) == [
+            RunnerFixtures.image.data,
+            Data("latest".utf8),
+        ])
+        #expect(await backend.requests.count == 2)
+        #expect(closed.count == 1)
+        #expect(viewModel.assessmentSubmissionStatus == .submitted)
+
+        await viewModel.dismiss()
+        await backend.releaseAssessment(2)
+        await environment.medicineAssessmentRunner.stop()
+    }
+
+    @Test func productionUserCancelStopsRunnerWithoutClosingAsAccepted()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(
+            plans: [.resolved], blockedAssessmentCalls: [1]
+        )
+        let recognizer = CountingMedicineRecognizer()
+        let environment = makeProductionEnvironment(
+            backend: backend, recognizer: recognizer
+        )
+        try await enterProductionAssessmentGate(environment.companion)
+        let activeInvocation = try #require(
+            environment.medicineAssessmentRunner.makeAssessmentInvocation(
+                imageInput: RunnerFixtures.image,
+                userProfile: RunnerFixtures.profile
+            )
+        )
+        let active = Task {
+            await environment.medicineAssessmentRunner.start(activeInvocation)
+        }
+        await backend.waitForAssessments(1)
+        let closed = MainActorSignal()
+        let viewModel = environment.makeMedicineCaptureViewModel {
+            closed.signal()
+        }
+
+        viewModel.cancel()
+        #expect(viewModel.state == .cancelled)
+        await backend.releaseAssessment(1)
+        await viewModel.dismiss()
+        _ = await active.value
+
+        #expect(closed.count == 0)
+        #expect(await backend.requests.count == 1)
+        #expect(environment.companion.canDepart == false)
+        #expect(environment.companion.canCompleteMedicineCheck == false)
     }
 }
 
@@ -782,6 +969,105 @@ private func makeRunner(
         ),
         session
     )
+}
+
+@MainActor
+private func makeProductionEnvironment(
+    backend: ControlledMedicineBackend,
+    recognizer: any MedicineTextRecognizing,
+    medicationRecords: [MedicationRecord] = []
+) -> AppEnvironment {
+    AppEnvironment(
+        clock: AppFixedClock(fixedDate: RunnerFixtures.date),
+        plan: .demo,
+        simulator: MockMedicineScanSimulator(
+            scriptedOutcomes: [
+                .findsCandidates(MedicineCandidate.demoCandidates),
+            ]
+        ),
+        readDelay: ImmediateMedicineReadDelay(),
+        capabilities: .phase0,
+        medicineRecognizer: recognizer,
+        medicineRequester: backend,
+        medicineConfirmer: backend,
+        userHealthProfile: RunnerFixtures.profile,
+        medicationRecords: medicationRecords
+    )
+}
+
+@MainActor
+private func enterProductionAssessmentGate(
+    _ session: CompanionSessionModel
+) async throws {
+    try #require(session.startCompanion())
+    session.beginMedicineRead()
+    await session.pendingReadTask?.value
+    guard case .awaitingMedicineConfirmation = session.state else {
+        Issue.record("production setup did not reach medicine confirmation")
+        return
+    }
+    session.confirmMedicine(MedicineCandidate.demoCandidates[0])
+    try #require(session.currentAssessmentGateLease != nil)
+}
+
+@MainActor
+private func captureFailure(
+    from viewModel: MedicineCaptureViewModel
+) async -> MedicineCaptureProcessingFailure {
+    for await status in viewModel.$assessmentSubmissionStatus.values {
+        if case let .failed(failure) = status { return failure }
+    }
+    return .processingFailed
+}
+
+@MainActor
+private struct ImmediateMedicineReadDelay: MedicineReadDelaying {
+    func wait() async throws {}
+}
+
+@MainActor
+private final class MainActorSignal {
+    private(set) var count = 0
+    private var waiters: [(Int, CheckedContinuation<Void, Never>)] = []
+
+    func signal() {
+        count += 1
+        let ready = waiters.filter { $0.0 <= count }
+        waiters.removeAll { $0.0 <= count }
+        ready.forEach { $0.1.resume() }
+    }
+
+    func wait(for target: Int = 1) async {
+        if count >= target { return }
+        await withCheckedContinuation { continuation in
+            waiters.append((target, continuation))
+        }
+    }
+}
+
+private actor ImmediateCameraCaptureService: CameraCaptureServicing {
+    private let input: OCRImageInput
+
+    init(input: OCRImageInput) {
+        self.input = input
+    }
+
+    func start(sessionID: UUID) async throws {}
+    func stop(sessionID: UUID) async {}
+
+    func capturePhoto(
+        requestID: UUID,
+        orientation: OCRImageOrientation,
+        capturedAt: Date
+    ) async throws -> CameraCaptureResult {
+        CameraCaptureResult(
+            imageData: input.data,
+            orientation: input.orientation,
+            capturedAt: input.capturedAt
+        )
+    }
+
+    func cancelPendingCapture(requestID: UUID) async {}
 }
 
 @MainActor
@@ -937,17 +1223,6 @@ private func sessionAtAssessmentGate()
     if let task = session.pendingReadTask { await task.value }
     session.confirmMedicine(MedicineCandidate.demoCandidates[0])
     return (session, store)
-}
-
-@MainActor
-private func runnerCoordinator(
-    _ runner: MedicineAssessmentRunner
-) throws -> MedicineAssessmentCoordinator {
-    try #require(
-        Mirror(reflecting: runner).children.first {
-            $0.label == "coordinator"
-        }?.value as? MedicineAssessmentCoordinator
-    )
 }
 
 @MainActor
@@ -1231,6 +1506,14 @@ private enum RunnerFixtures {
         currentMedicineIngredientIDs: [],
         bodyMetrics: nil,
         updatedAt: date
+    )
+    nonisolated static let medicationRecord = MedicationRecord(
+        id: UUID(uuidString: "00000000-0000-0000-0000-0000000000B1")!,
+        medicineID: "provider-record",
+        activeIngredientIDs: ["provider-ingredient"],
+        recordedAt: date,
+        eventType: .confirmedIntake,
+        source: .demoData
     )
 
     nonisolated static let candidateA = candidate(

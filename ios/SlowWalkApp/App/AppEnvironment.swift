@@ -20,6 +20,9 @@ final class AppEnvironment {
     let careActionShownRecorder: CareActionShownRecorder
     let companion: CompanionSessionModel
     let medicineAssessmentRunner: MedicineAssessmentRunner
+    let medicineCaptureSubmitter: MedicineAssessmentCaptureSubmitter
+    let currentUserHealthProfile: UserHealthProfile
+    let currentMedicationRecords: [MedicationRecord]
 
     /// What this build can really do — the app's single capability source.
     ///
@@ -31,15 +34,44 @@ final class AppEnvironment {
     /// whole app — behaviour and wording together — follow it.
     let capabilities: CapabilityCatalog
 
-    init(
+    convenience init(
         clock: any SlowWalkDomain.Clock = AppSystemClock(),
         plan: TodayPlan = .demo,
         simulator: MockMedicineScanSimulator = .demo,
         capabilities: CapabilityCatalog = .phase0
     ) {
+        let requester = LocalMedicineAssessmentRequester.demo(clock: clock)
+        self.init(
+            clock: clock,
+            plan: plan,
+            simulator: simulator,
+            readDelay: ContinuousMedicineReadDelay(),
+            capabilities: capabilities,
+            medicineRecognizer: AppleVisionMedicineTextRecognizer(),
+            medicineRequester: requester,
+            medicineConfirmer: requester,
+            userHealthProfile: Self.productionDemoUserHealthProfile,
+            medicationRecords: []
+        )
+    }
+
+    init(
+        clock: any SlowWalkDomain.Clock,
+        plan: TodayPlan,
+        simulator: MockMedicineScanSimulator,
+        readDelay: any MedicineReadDelaying,
+        capabilities: CapabilityCatalog,
+        medicineRecognizer: any MedicineTextRecognizing,
+        medicineRequester: any MedicineAssessmentRequesting,
+        medicineConfirmer: (any MedicineCandidateConfirming)?,
+        userHealthProfile: UserHealthProfile,
+        medicationRecords: [MedicationRecord]
+    ) {
         self.clock = clock
         self.plan = plan
         self.capabilities = capabilities
+        currentUserHealthProfile = userHealthProfile
+        currentMedicationRecords = medicationRecords
 
         let store = InMemoryCareRecordStore(clock: clock)
         careRecords = store
@@ -50,6 +82,7 @@ final class AppEnvironment {
             careActionShownRecorder: careActionShownRecorder,
             simulator: simulator,
             plan: plan,
+            readDelay: readDelay,
             capabilities: capabilities
         )
         self.companion = companion
@@ -65,16 +98,34 @@ final class AppEnvironment {
                 "Invalid built-in medicine recognition mapping configuration."
             )
         }
-        let requester = LocalMedicineAssessmentRequester.demo(clock: clock)
-        medicineAssessmentRunner = MedicineAssessmentRunner(
+        let runner = MedicineAssessmentRunner(
             session: companion,
-            recognizer: AppleVisionMedicineTextRecognizer(),
+            recognizer: medicineRecognizer,
             mapper: MedicineRecognitionInputMapper(
                 configuration: mappingConfiguration
             ),
-            requester: requester,
-            confirmer: requester,
+            requester: medicineRequester,
+            confirmer: medicineConfirmer,
             clock: clock
+        )
+        medicineAssessmentRunner = runner
+        medicineCaptureSubmitter = MedicineAssessmentCaptureSubmitter(
+            runner: runner,
+            userHealthProfileProvider: { userHealthProfile },
+            medicationRecordsProvider: { medicationRecords }
+        )
+    }
+
+    func makeMedicineCaptureViewModel(
+        previewSource: CameraPreviewSource = CameraPreviewSource(),
+        captureService: (any CameraCaptureServicing)? = nil,
+        onAssessmentSubmissionAccepted: @escaping @MainActor () -> Void = {}
+    ) -> MedicineCaptureViewModel {
+        MedicineCaptureViewModel(
+            processor: medicineCaptureSubmitter,
+            previewSource: previewSource,
+            captureService: captureService,
+            onAssessmentSubmissionAccepted: onAssessmentSubmissionAccepted
         )
     }
 
@@ -84,4 +135,25 @@ final class AppEnvironment {
     ) -> AppEnvironment {
         AppEnvironment(clock: AppFixedClock(fixedDate: fixedDate))
     }
+
+    /// Current production demo composition. Values mirror
+    /// `shared/fixtures/profile-complete.json`; medication history mirrors
+    /// `shared/fixtures/medication-history-empty.json`.
+    private static let productionDemoUserHealthProfile = UserHealthProfile(
+        id: UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
+        age: 72,
+        allergies: ["synthetic-pollen"],
+        diagnosedConditions: ["synthetic-condition-a"],
+        currentMedicineIngredientIDs: ["synthetic-ingredient-b"],
+        bodyMetrics: BodyMetrics(
+            systolicBloodPressure: 120,
+            diastolicBloodPressure: 80,
+            heartRate: 70,
+            measuredAt: Date(timeIntervalSince1970: 1_753_314_900),
+            source: "demo_data",
+            deviceIdentifier: "synthetic-device-01"
+        ),
+        updatedAt: Date(timeIntervalSince1970: 1_753_314_900),
+        createdAt: Date(timeIntervalSince1970: 1_752_969_600)
+    )
 }

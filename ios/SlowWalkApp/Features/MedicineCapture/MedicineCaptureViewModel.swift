@@ -32,24 +32,31 @@ final class MedicineCaptureViewModel: ObservableObject {
     let previewSource: CameraPreviewSource
     private let captureService: any CameraCaptureServicing
     private let processor: any MedicineCaptureProcessing
+    private let onAssessmentSubmissionAccepted: @MainActor () -> Void
 
     private var activeCaptureID: UUID?
     private var activeSessionID: UUID?
     private var captureTask: Task<Void, Never>?
     private var processingTask: Task<Void, Never>?
     private var processorCancellationTask: Task<Void, Never>?
+    private var processorCancellationRequired = false
     private var processingGeneration: Int?
+    private var acceptedHandoffGeneration: Int?
+    private var acceptedHandoffWasDismissed = false
     private var currentGeneration = 0
 
     init(
         processor: any MedicineCaptureProcessing,
         previewSource: CameraPreviewSource = CameraPreviewSource(),
-        captureService: (any CameraCaptureServicing)? = nil
+        captureService: (any CameraCaptureServicing)? = nil,
+        onAssessmentSubmissionAccepted: @escaping @MainActor () -> Void = {}
     ) {
         self.processor = processor
         self.previewSource = previewSource
         self.captureService = captureService
             ?? previewSource.makeCaptureService()
+        self.onAssessmentSubmissionAccepted =
+            onAssessmentSubmissionAccepted
     }
 
     convenience init(
@@ -62,7 +69,8 @@ final class MedicineCaptureViewModel: ObservableObject {
                 recognizer: recognizer
             ),
             previewSource: previewSource,
-            captureService: captureService
+            captureService: captureService,
+            onAssessmentSubmissionAccepted: {}
         )
     }
 
@@ -176,12 +184,15 @@ final class MedicineCaptureViewModel: ObservableObject {
     // MARK: - Cancel / Dismiss
 
     func cancel() {
+        guard acceptedHandoffGeneration == nil,
+              !acceptedHandoffWasDismissed
+        else { return }
         let requestID = activeCaptureID
         activeCaptureID = nil
         currentGeneration &+= 1
         captureTask?.cancel()
         captureTask = nil
-        _ = beginProcessingCancellation()
+        _ = beginProcessingCancellation(forceInitialStop: true)
         state = .cancelled
         assessmentSubmissionStatus = .none
         if let requestID {
@@ -201,7 +212,21 @@ final class MedicineCaptureViewModel: ObservableObject {
         currentGeneration &+= 1
         captureTask?.cancel()
         captureTask = nil
-        let processorCancellation = beginProcessingCancellation()
+        let preservesAcceptedAssessment = acceptedHandoffWasDismissed
+            || (assessmentSubmissionStatus == .submitted
+                && acceptedHandoffGeneration == processingGeneration)
+        let processorCancellation: Task<Void, Never>?
+        if preservesAcceptedAssessment {
+            acceptedHandoffWasDismissed = true
+            processingTask = nil
+            processingGeneration = nil
+            processorCancellationRequired = false
+            processorCancellation = nil
+        } else {
+            processorCancellation = beginProcessingCancellation(
+                forceInitialStop: true
+            )
+        }
         if let requestID {
             await captureService.cancelPendingCapture(
                 requestID: requestID
@@ -214,13 +239,19 @@ final class MedicineCaptureViewModel: ObservableObject {
         }
         state = .idle
         assessmentSubmissionStatus = .none
+        acceptedHandoffGeneration = nil
     }
 
     func reset() {
+        if acceptedHandoffWasDismissed {
+            state = .idle
+            assessmentSubmissionStatus = .none
+            return
+        }
         activeCaptureID = nil
         captureTask?.cancel()
         captureTask = nil
-        _ = beginProcessingCancellation()
+        _ = beginProcessingCancellation(forceInitialStop: true)
         currentGeneration &+= 1
         state = .idle
         assessmentSubmissionStatus = .none
@@ -244,11 +275,14 @@ final class MedicineCaptureViewModel: ObservableObject {
     ) {
         state = .recognizing(generation: generation)
         assessmentSubmissionStatus = .none
+        acceptedHandoffGeneration = nil
+        acceptedHandoffWasDismissed = false
         processingGeneration = generation
+        processorCancellationRequired = true
         let cancellationBarrier = processorCancellationTask
         processingTask = Task { @MainActor [processor, weak self] in
             await cancellationBarrier?.value
-            guard let self else { return }
+            guard !Task.isCancelled, let self else { return }
             do {
                 let result = try await processor.process(input)
                 try Task.checkCancellation()
@@ -276,7 +310,9 @@ final class MedicineCaptureViewModel: ObservableObject {
                 ? .noTextFound
                 : .success(observations)
         case .submittedForAssessment:
+            acceptedHandoffGeneration = generation
             assessmentSubmissionStatus = .submitted
+            onAssessmentSubmissionAccepted()
         }
     }
 
@@ -314,13 +350,19 @@ final class MedicineCaptureViewModel: ObservableObject {
     // MARK: - Helpers
 
     @discardableResult
-    private func beginProcessingCancellation() -> Task<Void, Never>? {
+    private func beginProcessingCancellation(
+        forceInitialStop: Bool = false
+    ) -> Task<Void, Never>? {
         processingTask?.cancel()
         processingTask = nil
-        guard processingGeneration != nil else {
+        if forceInitialStop, processorCancellationTask == nil {
+            processorCancellationRequired = true
+        }
+        guard processingGeneration != nil || processorCancellationRequired else {
             return processorCancellationTask
         }
         processingGeneration = nil
+        processorCancellationRequired = false
         let predecessor = processorCancellationTask
         let processor = processor
         let task = Task { @MainActor in
