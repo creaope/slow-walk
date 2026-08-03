@@ -20,11 +20,16 @@ private actor FakeCameraCaptureService: CameraCaptureServicing {
     private var startWaiters: [(
         count: Int, continuation: CheckedContinuation<Void, Never>
     )] = []
+    private let stopGate: CaptureGate?
     private var activeSessionID: UUID?
     private(set) var startIDs: [UUID] = []
     private(set) var stopIDs: [UUID] = []
     private(set) var cancelledIDs: [UUID] = []
     private(set) var captureIDs: [UUID] = []
+
+    init(stopGate: CaptureGate? = nil) {
+        self.stopGate = stopGate
+    }
 
     func start(sessionID: UUID) async throws {
         activeSessionID = sessionID
@@ -36,8 +41,10 @@ private actor FakeCameraCaptureService: CameraCaptureServicing {
 
     func stop(sessionID: UUID) async {
         guard activeSessionID == sessionID else { return }
-        activeSessionID = nil
         stopIDs.append(sessionID)
+        if let stopGate { await stopGate.wait() }
+        guard activeSessionID == sessionID else { return }
+        activeSessionID = nil
     }
 
     func currentSessionID() -> UUID? { activeSessionID }
@@ -744,6 +751,177 @@ struct MedicineCaptureViewModelTests {
 
     // MARK: - Device demo hardening
 
+    @Test func backgroundPreparationInvalidatesBeforeStopCompletes()
+        async throws
+    {
+        let stopGate = CaptureGate()
+        let camera = FakeCameraCaptureService(stopGate: stopGate)
+        let vm = MedicineCaptureViewModel(
+            recognizer: SpyRecognizer { _ in [] },
+            captureService: camera
+        )
+        try await vm.startSession()
+        let oldSessionID = try #require(await camera.currentSessionID())
+        #expect(vm.previewSource.previewLayer != nil)
+
+        let cleanup = vm.prepareForBackground()
+        #expect(vm.state == .idle)
+        #expect(vm.isCameraSessionStarted == false)
+        #expect(vm.previewSource.previewLayer == nil)
+        #expect(await camera.currentSessionID() == oldSessionID)
+
+        let teardown = Task {
+            await vm.finishBackgroundCleanup(cleanup)
+        }
+        defer { stopGate.open() }
+        await stopGate.waitUntilEntered()
+        #expect(vm.state == .idle)
+        #expect(vm.isCameraSessionStarted == false)
+        #expect(vm.previewSource.previewLayer == nil)
+
+        stopGate.open()
+        await teardown.value
+        #expect(vm.state == .idle)
+        #expect(await camera.currentSessionID() == nil)
+    }
+
+    @Test func oldStopDoesNotOverwriteNewPhotoLoad() async throws {
+        let stopGate = CaptureGate()
+        let camera = FakeCameraCaptureService(stopGate: stopGate)
+        let processor = SpyCaptureProcessor { _ in
+            .recognized([makeObs()])
+        }
+        let vm = MedicineCaptureViewModel(
+            processor: processor,
+            captureService: camera
+        )
+        try await vm.startSession()
+
+        let cleanup = vm.prepareForBackground()
+        let teardown = Task {
+            await vm.finishBackgroundCleanup(cleanup)
+        }
+        defer { stopGate.open() }
+        await stopGate.waitUntilEntered()
+        vm.appDidBecomeActive()
+        let loadID = try #require(vm.beginPhotoLoading())
+        let loadingState = vm.state
+        guard case .loadingPhoto = loadingState else {
+            Issue.record("new photo load did not start")
+            return
+        }
+
+        stopGate.open()
+        await teardown.value
+        #expect(vm.state == loadingState)
+        #expect(vm.submitLoadedPhoto(
+            loadID: loadID,
+            imageData: img("foreground-photo"),
+            orientation: .up,
+            capturedAt: Date(timeIntervalSince1970: 200)
+        ))
+        #expect(await waitForRecognitionResult(vm)
+            == .success([makeObs()]))
+        #expect(processor.inputs.count == 1)
+        #expect(vm.submitLoadedPhoto(
+            loadID: loadID,
+            imageData: img("duplicate"),
+            orientation: .up,
+            capturedAt: Date(timeIntervalSince1970: 300)
+        ) == false)
+
+        vm.reset()
+        #expect(vm.beginPhotoLoading() != nil)
+    }
+
+    @Test func oldStopDoesNotOverwriteNewCameraSession() async throws {
+        let stopGate = CaptureGate()
+        let permission = ControllableCameraPermissionProvider(
+            state: .authorized
+        )
+        let camera = FakeCameraCaptureService(stopGate: stopGate)
+        let recognizer = SpyRecognizer { _ in [makeObs()] }
+        let vm = MedicineCaptureViewModel(
+            recognizer: recognizer,
+            captureService: camera,
+            permissionProvider: permission
+        )
+        try await vm.startSession()
+
+        let cleanup = vm.prepareForBackground()
+        let teardown = Task {
+            await vm.finishBackgroundCleanup(cleanup)
+        }
+        defer { stopGate.open() }
+        await stopGate.waitUntilEntered()
+        vm.appDidBecomeActive()
+        #expect(vm.beginCameraPresentation())
+        await camera.waitUntilStartCount(2)
+        let sessionIDs = await camera.startIDs
+        let newSessionID = try #require(sessionIDs.last)
+        #expect(vm.state == .ready)
+        #expect(vm.isCameraSessionStarted)
+
+        stopGate.open()
+        await teardown.value
+        #expect(await camera.currentSessionID() == newSessionID)
+        #expect(vm.state == .ready)
+        #expect(vm.isCameraSessionStarted)
+
+        vm.capturePhoto()
+        let requestID = await camera.nextPendingRequestID()
+        await camera.complete(
+            requestID: requestID,
+            data: img("foreground-camera")
+        )
+        _ = await waitForRecognitionResult(vm)
+        #expect(recognizer.callCount == 1)
+        #expect(await camera.captureIDs == [requestID])
+    }
+
+    @Test func backgroundAndDismissAreIdempotentDuringSlowStop()
+        async throws
+    {
+        let stopGate = CaptureGate()
+        let permission = ControllableCameraPermissionProvider(
+            state: .authorized
+        )
+        let camera = FakeCameraCaptureService(stopGate: stopGate)
+        let vm = MedicineCaptureViewModel(
+            recognizer: SpyRecognizer { _ in [] },
+            captureService: camera,
+            permissionProvider: permission
+        )
+        try await vm.startSession()
+        vm.capturePhoto()
+        let requestID = await camera.nextPendingRequestID()
+
+        let cleanup = vm.prepareForBackground()
+        let teardown = Task {
+            await vm.finishBackgroundCleanup(cleanup)
+        }
+        defer { stopGate.open() }
+        await stopGate.waitUntilEntered()
+        #expect(await camera.cancelledIDs == [requestID])
+
+        let repeatedCleanup = vm.prepareForBackground()
+        await vm.finishBackgroundCleanup(repeatedCleanup)
+        await vm.dismiss()
+        #expect(vm.state == .idle)
+        #expect(await camera.cancelledIDs == [requestID])
+        #expect(await camera.stopIDs.count == 1)
+
+        stopGate.open()
+        await teardown.value
+        vm.appDidBecomeActive()
+        #expect(vm.beginCameraPresentation())
+        await camera.waitUntilStartCount(2)
+        #expect(vm.state == .ready)
+        #expect(vm.isCameraSessionStarted)
+        #expect(await camera.cancelledIDs == [requestID])
+        #expect(await camera.stopIDs.count == 1)
+    }
+
     @Test func notDeterminedRapidTapRequestsOnceAndStartsOnce() async {
         let permission = ControllableCameraPermissionProvider(
             state: .notDetermined
@@ -784,7 +962,8 @@ struct MedicineCaptureViewModelTests {
         #expect(permission.requestCount == 0)
         #expect(await camera.startIDs.count == 1)
         #expect(vm.state == .ready)
-        await vm.appDidEnterBackground()
+        let cleanup = vm.prepareForBackground()
+        await vm.finishBackgroundCleanup(cleanup)
         #expect(await camera.stopIDs.count == 1)
         vm.appDidBecomeActive()
         #expect(await camera.startIDs.count == 1)
@@ -908,7 +1087,8 @@ struct MedicineCaptureViewModelTests {
             capturedAt: Date(timeIntervalSince1970: 100)
         ))
         await processGate.waitUntilEntered()
-        await vm.appDidEnterBackground()
+        let cleanup = vm.prepareForBackground()
+        await vm.finishBackgroundCleanup(cleanup)
         guard case .recognizing = vm.state else {
             Issue.record("background must preserve processing")
             return

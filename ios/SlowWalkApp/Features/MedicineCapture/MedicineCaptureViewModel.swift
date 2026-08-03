@@ -53,6 +53,11 @@ enum MedicineAssessmentSubmissionStatus: Equatable {
 
 @MainActor
 final class MedicineCaptureViewModel: ObservableObject {
+    struct BackgroundCleanup: Sendable {
+        fileprivate let captureRequestID: UUID?
+        fileprivate let sessionID: UUID?
+    }
+
     @Published var state: MedicineCaptureState = .idle
     @Published private(set) var assessmentSubmissionStatus:
         MedicineAssessmentSubmissionStatus = .none
@@ -410,30 +415,26 @@ final class MedicineCaptureViewModel: ObservableObject {
         }
     }
 
-    func appDidEnterBackground() async {
+    func prepareForBackground() -> BackgroundCleanup {
         invalidateCameraPreparation()
         isPhotosPickerPresented = false
 
         let abandonsInput = activeCaptureID != nil
             || activePhotoLoadID != nil
         let requestID = activeCaptureID
+        let sessionID = activeSessionID
         activeCaptureID = nil
         activePhotoLoadID = nil
+        activeSessionID = nil
+        captureTask?.cancel()
+        captureTask = nil
         if abandonsInput {
             currentGeneration &+= 1
-            captureTask?.cancel()
-            captureTask = nil
-        }
-        if let requestID {
-            await captureService.cancelPendingCapture(requestID: requestID)
         }
 
-        let sessionID = activeSessionID
-        activeSessionID = nil
         isCameraSessionStarted = false
         if let sessionID {
             previewSource.clearPreviewLayer(sessionID: sessionID)
-            await captureService.stop(sessionID: sessionID)
         }
 
         switch state {
@@ -442,6 +443,20 @@ final class MedicineCaptureViewModel: ObservableObject {
             state = .idle
         default:
             break
+        }
+
+        return BackgroundCleanup(
+            captureRequestID: requestID,
+            sessionID: sessionID
+        )
+    }
+
+    func finishBackgroundCleanup(_ cleanup: BackgroundCleanup) async {
+        if let requestID = cleanup.captureRequestID {
+            await captureService.cancelPendingCapture(requestID: requestID)
+        }
+        if let sessionID = cleanup.sessionID {
+            await captureService.stop(sessionID: sessionID)
         }
     }
 

@@ -418,7 +418,8 @@ struct MedicineCaptureView: View {
             photosPickerItem = nil
             isPhotosPickerPresented = false
             viewModel.endPhotosPickerPresentation()
-            Task { await viewModel.appDidEnterBackground() }
+            let cleanup = viewModel.prepareForBackground()
+            Task { await viewModel.finishBackgroundCleanup(cleanup) }
         case .inactive:
             break
         @unknown default:
