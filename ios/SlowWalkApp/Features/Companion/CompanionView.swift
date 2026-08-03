@@ -1,3 +1,7 @@
+import Foundation
+import SlowWalkAPIContracts
+import SlowWalkClientCore
+import SlowWalkPresentation
 import SwiftUI
 
 /// Holds one continuous companion session from start to finish.
@@ -7,9 +11,31 @@ import SwiftUI
 /// follow underneath.
 struct CompanionView: View {
     @Environment(AppEnvironment.self) private var environment
+    private let sessionOverride: CompanionSessionModel?
 
-    private var session: CompanionSessionModel { environment.companion }
+    init(session: CompanionSessionModel? = nil) {
+        sessionOverride = session
+    }
+
+    private var session: CompanionSessionModel {
+        sessionOverride ?? environment.companion
+    }
+
     var body: some View {
+        rootContent
+    }
+
+    @ViewBuilder
+    private var rootContent: some View {
+        switch session.state {
+        case let .awaitingMedicineAssessment(gate):
+            assessmentPage(gate)
+        default:
+            companionFlowPage
+        }
+    }
+
+    private var companionFlowPage: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 DemoDataBanner()
@@ -21,6 +47,162 @@ struct CompanionView: View {
                 NotADiagnosisNotice()
             }
             .padding()
+        }
+    }
+
+    // MARK: - Medicine assessment
+
+    private func assessmentPage(
+        _ gate: MedicineAssessmentGate
+    ) -> some View {
+        let displayState = MedicineStateMapper.map(
+            gate.assessmentState,
+            demoDisclaimer: CompanionCopy.demoDataNotice
+        )
+
+        return VStack(spacing: 0) {
+            // Action cards render the mapped disclaimer themselves. States
+            // without a card keep the app-level banner, so every assessment
+            // page carries exactly one clear demo-data notice.
+            if displayState.actionCard == nil {
+                DemoDataBanner()
+                    .padding(.horizontal, 20)
+                    .padding(.top, 20)
+            }
+
+            assessmentPresentation(
+                gate: gate,
+                displayState: displayState
+            )
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            assessmentActions(gate)
+        }
+    }
+
+    @ViewBuilder
+    private func assessmentPresentation(
+        gate: MedicineAssessmentGate,
+        displayState: MedicineDisplayState
+    ) -> some View {
+        switch AssessmentPresentationIdentity(gate.assessmentState) {
+        case let .result(requestID):
+            MedicineAssessmentView(
+                state: displayState,
+                retryAction: {
+                    session.retakeMedicinePhoto()
+                },
+                confirmAction: assessmentCandidateConfirmationAction
+            )
+            .id(requestID)
+            .onAppear {
+                _ = session.medicineAssessmentResultDidDisplay()
+            }
+
+        case .nonResult:
+            MedicineAssessmentView(
+                state: displayState,
+                retryAction: {
+                    session.retakeMedicinePhoto()
+                },
+                confirmAction: assessmentCandidateConfirmationAction
+            )
+        }
+    }
+
+    private func assessmentActions(
+        _ gate: MedicineAssessmentGate
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if let continuation = AssessmentContinuation(
+                canDepart: session.canDepart,
+                canCompleteMedicineCheck: session.canCompleteMedicineCheck
+            ) {
+                primaryButton(continuation.title) {
+                    _ = continuation.perform(on: session)
+                }
+            }
+
+            primaryButton(CompanionCopy.reconsiderMedicineTitle) {
+                session.reconsiderMedicineChoice()
+            }
+
+            if presentationShowsRetry(for: gate.assessmentState) == false {
+                secondaryButton(CompanionCopy.retryPhotoTitle) {
+                    session.retakeMedicinePhoto()
+                }
+            }
+
+            if session.canEndEarly {
+                endEarlyButton
+            }
+
+            NotADiagnosisNotice()
+        }
+        .padding(20)
+        .background(.background)
+    }
+
+    private func presentationShowsRetry(
+        for state: MedicineAssessmentViewState
+    ) -> Bool {
+        guard case let .failed(failure) = state else { return false }
+        return failure.isRecoverable
+    }
+
+    /// The canonical confirmation callback has no candidate identity, so this
+    /// flow cannot safely connect it to `session.confirmMedicine(_:)`.
+    var assessmentCandidateConfirmationAction: (() -> Void)? { nil }
+
+    enum AssessmentPresentationIdentity: Equatable {
+        case result(UUID)
+        case nonResult
+
+        init(_ state: MedicineAssessmentViewState) {
+            if case let .result(presentation) = state {
+                self = .result(presentation.response.requestID)
+            } else {
+                self = .nonResult
+            }
+        }
+    }
+
+    enum AssessmentContinuation: Equatable {
+        case outing
+        case medicineCheck
+
+        init?(
+            canDepart: Bool,
+            canCompleteMedicineCheck: Bool
+        ) {
+            switch (canDepart, canCompleteMedicineCheck) {
+            case (true, false):
+                self = .outing
+            case (false, true):
+                self = .medicineCheck
+            case (false, false), (true, true):
+                return nil
+            }
+        }
+
+        var title: String {
+            switch self {
+            case .outing:
+                CompanionCopy.continueCompanionTitle
+            case .medicineCheck:
+                CompanionCopy.completeMedicineCheckTitle
+            }
+        }
+
+        @MainActor
+        @discardableResult
+        func perform(on session: CompanionSessionModel) -> Bool {
+            switch self {
+            case .outing:
+                session.continueToOuting()
+            case .medicineCheck:
+                session.completeMedicineCheck()
+            }
         }
     }
 
@@ -87,8 +269,8 @@ struct CompanionView: View {
         case let .awaitingMedicineConfirmation(prompt):
             confirmationControls(prompt)
 
-        case let .awaitingMedicineAssessment(gate):
-            assessmentGateControls(gate)
+        case .awaitingMedicineAssessment:
+            EmptyView()
 
         case .travelling:
             primaryButton(CompanionCopy.approachStopTitle) {
@@ -116,43 +298,6 @@ struct CompanionView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("正在按演示脚本模拟识别药名，请稍等。本阶段不读取照片。")
-    }
-
-    /// The ways out of the assessment gate.
-    ///
-    /// There is deliberately no control here that continues the outing. The
-    /// person may choose a different medicine, read again, or end the session —
-    /// and `session.canDepart` is asserted so a departure control cannot be
-    /// added back without the assessment result that would justify it.
-    private func assessmentGateControls(
-        _ gate: MedicineAssessmentGate
-    ) -> some View {
-        VStack(alignment: .leading, spacing: 16) {
-            MedicineAssessmentPendingPanel(
-                gate: gate,
-                // From the session's own table, so the badge in this panel and
-                // the sentence above it describe the same build.
-                assessmentStatus: session.capabilities
-                    .status(of: .medicineRiskAssessment)
-            )
-
-            primaryButton(CompanionCopy.reconsiderMedicineTitle) {
-                session.reconsiderMedicineChoice()
-            }
-
-            secondaryButton(CompanionCopy.retryPhotoTitle) {
-                session.retakeMedicinePhoto()
-            }
-
-            if session.canDepart {
-                // Unreachable today: `canDepart` is false for every value of
-                // `MedicineAssessmentProgress` this build can produce. Kept as
-                // the single place a departure control may ever live, so it
-                // cannot be added anywhere that skips the check.
-                primaryButton(CompanionCopy.continueCompanionTitle) {}
-                    .disabled(true)
-            }
-        }
     }
 
     /// Recovery paths after a read that did not succeed.

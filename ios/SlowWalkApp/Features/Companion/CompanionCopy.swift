@@ -253,6 +253,7 @@ enum CompanionCopy {
 
     static let startCompanionTitle = "开始陪伴"
     static let continueCompanionTitle = "继续陪伴"
+    static let completeMedicineCheckTitle = "完成用药检查"
     static let beginMedicineReadTitle = "确认要带的药"
     static let reconsiderMedicineTitle = "重新选择药名"
     static let approachStopTitle = "模拟：即将到站"
