@@ -80,7 +80,7 @@ final class MedicineAssessmentRunner {
     private var stoppingBarrier: StoppingBarrier?
     private var updateConsumerTask: Task<Void, Never>?
 
-    init(
+    convenience init(
         session: CompanionSessionModel,
         recognizer: any MedicineTextRecognizing,
         mapper: MedicineRecognitionInputMapper,
@@ -88,14 +88,24 @@ final class MedicineAssessmentRunner {
         confirmer: (any MedicineCandidateConfirming)? = nil,
         clock: any SlowWalkDomain.Clock
     ) {
-        self.session = session
-        coordinator = MedicineAssessmentCoordinator(
-            recognizer: recognizer,
-            mapper: mapper,
-            requester: requester,
-            confirmer: confirmer,
-            clock: clock
+        self.init(
+            session: session,
+            coordinator: MedicineAssessmentCoordinator(
+                recognizer: recognizer,
+                mapper: mapper,
+                requester: requester,
+                confirmer: confirmer,
+                clock: clock
+            )
         )
+    }
+
+    init(
+        session: CompanionSessionModel,
+        coordinator: MedicineAssessmentCoordinator
+    ) {
+        self.session = session
+        self.coordinator = coordinator
         installUpdateConsumer()
         session.installAssessmentGateInvalidationHandler { [weak self] lease in
             self?.requestStop(forInvalidatedGateLease: lease)

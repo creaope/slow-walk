@@ -340,8 +340,42 @@ struct MedicineAssessmentRunnerTests {
         _ = await replacement.value
         _ = await first.value
 
+        #expect(await waitForGate(session, state: .result))
         #expect(session.assessmentGate?.latestUpdate?.sequenceNumber == 4)
         #expect(session.assessmentGate?.assessmentState.isResult == true)
+    }
+
+    @Test func updateAboveExpectedGenerationIsRejectedRatherThanAdopted()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(plans: [.resolved])
+        let (session, _) = await sessionAtAssessmentGate()
+        let coordinator = MedicineAssessmentCoordinator(
+            recognizer: StaticMedicineRecognizer(),
+            mapper: MedicineRecognitionInputMapper(
+                configuration: try MedicineRecognitionMappingConfiguration(
+                    minimumConfidence: 0.5,
+                    lowConfidenceHandling: .discard
+                )
+            ),
+            requester: backend,
+            confirmer: backend,
+            clock: AppFixedClock(fixedDate: RunnerFixtures.date)
+        )
+        let runner = MedicineAssessmentRunner(
+            session: session,
+            coordinator: coordinator
+        )
+        #expect(await runner.start(try makeAssessmentInvocation(runner)))
+        #expect(await waitForGate(session, state: .result))
+        let accepted = try #require(session.assessmentGate?.latestUpdate)
+        #expect(accepted.sequenceNumber == 2)
+
+        await coordinator.reset()
+        await repeatedlyYield()
+
+        #expect(await coordinator.currentStateUpdate.sequenceNumber == 3)
+        #expect(session.assessmentGate?.latestUpdate == accepted)
     }
 
     @Test func mismatchedResponseRequestIDIsRejected() async throws {
@@ -685,19 +719,11 @@ struct MedicineAssessmentRunnerTests {
         try await verifyValidQueuedStart(rejectTransition: true)
     }
 
-    @Test func appEnvironmentReturnsItsSingleStableMedicineAssessmentRunner() {
+    @Test func appEnvironmentProvidesProductionDemoHealthContext() {
         let environment = AppEnvironment(
             clock: AppFixedClock(fixedDate: RunnerFixtures.date)
         )
 
-        #expect(
-            environment.medicineAssessmentRunner
-                === environment.medicineAssessmentRunner
-        )
-        #expect(
-            environment.medicineCaptureSubmitter
-                === environment.medicineCaptureSubmitter
-        )
         #expect(
             environment.currentUserHealthProfile.id.uuidString
                 == "10000000-0000-0000-0000-000000000001"
@@ -706,7 +732,7 @@ struct MedicineAssessmentRunnerTests {
         #expect(environment.currentMedicationRecords.isEmpty)
     }
 
-    @Test func productionPhotoHandoffClosesBeforeCanonicalResultAndDoesNotStopIt()
+    @Test func productionCaptureAndEnvironmentStopShareCanonicalRunnerLifecycle()
         async throws
     {
         let backend = ControlledMedicineBackend(
@@ -720,6 +746,9 @@ struct MedicineAssessmentRunnerTests {
             medicationRecords: [record]
         )
         try await enterProductionAssessmentGate(environment.companion)
+        let gateLease = try #require(
+            environment.companion.currentAssessmentGateLease
+        )
         let closed = MainActorSignal()
         let viewModel = environment.makeMedicineCaptureViewModel {
             closed.signal()
@@ -760,8 +789,29 @@ struct MedicineAssessmentRunnerTests {
         await viewModel.dismiss()
         #expect(await backend.completedAssessmentCount == 0)
 
+        let stopEntered = MainActorEntryFlag()
+        let stopCompleted = CompletionFlag()
+        let stop = Task { @MainActor in
+            stopEntered.value = true
+            await environment.medicineAssessmentRunner.stop()
+            await stopCompleted.markComplete()
+        }
+        #expect(await waitForEntry(stopEntered))
+        await repeatedlyYield()
+
+        #expect(await stopCompleted.isComplete == false)
+        #expect(await recognizer.callCount == 1)
+        #expect(await backend.requests.count == 1)
+        #expect(environment.companion.currentAssessmentGateLease == gateLease)
+
         await backend.releaseAssessment(1)
-        await environment.medicineAssessmentRunner.stop()
+        await stop.value
+
+        #expect(await stopCompleted.isComplete)
+        #expect(await backend.completedAssessmentCount == 1)
+        #expect(await recognizer.callCount == 1)
+        #expect(await backend.requests.count == 1)
+        #expect(environment.companion.currentAssessmentGateLease == gateLease)
     }
 
     @Test func productionCameraUsesTheSameCanonicalSubmitterAndOneOCR()
