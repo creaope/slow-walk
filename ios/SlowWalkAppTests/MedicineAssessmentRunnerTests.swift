@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import SlowWalkAPIContracts
 import SlowWalkClientCore
@@ -13,12 +14,184 @@ struct MedicineAssessmentRunnerTests {
         let backend = ControlledMedicineBackend(plans: [.resolved])
         let (runner, session) = try await makeRunner(backend: backend)
 
-        await runner.start(try makeAssessmentInvocation(runner))
+        #expect(await runner.start(try makeAssessmentInvocation(runner)))
 
         #expect(await waitForGate(session, state: .result))
         #expect(session.assessmentGate?.latestUpdate?.sequenceNumber == 2)
         #expect(await backend.requests.count == 1)
         #expect(await backend.requests.first?.input.recognizedTexts == ["Test Medicine"])
+    }
+
+    @Test func startRejectsNilAndAnInvocationWithAnInvalidatedGateLease()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(plans: [.resolved])
+        let recognizer = CountingMedicineRecognizer()
+        let (runner, session) = try await makeRunner(
+            backend: backend, recognizer: recognizer
+        )
+
+        #expect(await runner.start(nil) == false)
+        let invocation = try makeAssessmentInvocation(runner)
+        session.reconsiderMedicineChoice()
+        #expect(await runner.start(invocation) == false)
+
+        #expect(await recognizer.callCount == 0)
+        #expect(await backend.requests.isEmpty)
+    }
+
+    @Test func captureSubmitterHandsProvidersAndImageToOneCanonicalOCR()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(plans: [.resolved])
+        let recognizer = CountingMedicineRecognizer()
+        let (runner, _) = try await makeRunner(
+            backend: backend, recognizer: recognizer
+        )
+        let input = OCRImageInput(
+            data: Data([0xA3, 0x01]),
+            orientation: .leftMirrored,
+            capturedAt: Date(timeIntervalSince1970: 987)
+        )
+        let record = MedicationRecord(
+            id: UUID(), medicineID: "provider-record",
+            activeIngredientIDs: ["provider-ingredient"],
+            recordedAt: RunnerFixtures.date,
+            eventType: .confirmedIntake, source: .manualEntry
+        )
+        var profileCalls = 0
+        var recordCalls = 0
+        let submitter = MedicineAssessmentCaptureSubmitter(
+            runner: runner,
+            userHealthProfileProvider: {
+                profileCalls += 1
+                return RunnerFixtures.profile
+            },
+            medicationRecordsProvider: {
+                recordCalls += 1
+                return [record]
+            }
+        )
+        let viewModel = MedicineCaptureViewModel(processor: submitter)
+
+        viewModel.capture(
+            imageData: input.data,
+            orientation: input.orientation,
+            capturedAt: input.capturedAt
+        )
+        #expect(await waitForCaptureSubmission(viewModel))
+
+        #expect(await recognizer.callCount == 1)
+        #expect(await recognizer.inputs == [input])
+        #expect(profileCalls == 1)
+        #expect(recordCalls == 1)
+        #expect(await backend.requests.first?.userProfile.id == RunnerFixtures.profile.id)
+        #expect(await backend.requests.first?.recentRecords.map(\.id) == [record.id])
+        #expect(viewModel.assessmentSubmissionStatus == .submitted)
+        guard case .recognizing = viewModel.state else {
+            Issue.record("canonical handoff must not publish Capture success")
+            return
+        }
+    }
+
+    @Test func submitterRejectsUnavailableGateBeforeOCR() async throws {
+        let backend = ControlledMedicineBackend(plans: [.resolved])
+        let recognizer = CountingMedicineRecognizer()
+        let (runner, session) = try await makeRunner(
+            backend: backend, recognizer: recognizer
+        )
+        let submitter = MedicineAssessmentCaptureSubmitter(
+            runner: runner,
+            userHealthProfileProvider: { RunnerFixtures.profile },
+            medicationRecordsProvider: { [] }
+        )
+        session.reconsiderMedicineChoice()
+
+        do {
+            _ = try await submitter.process(RunnerFixtures.image)
+            Issue.record("expected assessment gate rejection")
+        } catch let failure as MedicineCaptureProcessingFailure {
+            #expect(failure == .assessmentGateUnavailable)
+        }
+
+        #expect(await recognizer.callCount == 0)
+        #expect(await backend.requests.isEmpty)
+    }
+
+    @Test func submitterReportsRunnerRejectionWhenItsGateLeaseExpires()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(
+            plans: [.resolved], blockedAssessmentCalls: [1]
+        )
+        let recognizer = CountingMedicineRecognizer()
+        let (runner, session) = try await makeRunner(
+            backend: backend, recognizer: recognizer
+        )
+        let firstInvocation = try makeAssessmentInvocation(runner)
+        let first = Task { await runner.start(firstInvocation) }
+        await backend.waitForAssessments(1)
+        let stop = Task { await runner.stop() }
+        let providerEntered = MainActorEntryFlag()
+        let submitter = MedicineAssessmentCaptureSubmitter(
+            runner: runner,
+            userHealthProfileProvider: {
+                providerEntered.value = true
+                return RunnerFixtures.profile
+            },
+            medicationRecordsProvider: { [] }
+        )
+        let queued = Task { try await submitter.process(RunnerFixtures.image) }
+        #expect(await waitForEntry(providerEntered))
+
+        _ = try replaceAssessmentGate(in: session, candidateAt: 1)
+        await backend.releaseAssessment(1)
+        await stop.value
+        _ = await first.value
+
+        guard case .failure(let error) = await queued.result else {
+            Issue.record("runner rejection must not report submission success")
+            return
+        }
+        #expect(
+            error as? MedicineCaptureProcessingFailure
+                == .assessmentSubmissionRejected
+        )
+        #expect(await recognizer.callCount == 1)
+    }
+
+    @Test func cancelledSubmitterJoinsRunnerStopBeforeReturning() async throws {
+        let backend = ControlledMedicineBackend(
+            plans: [.resolved, .resolved], blockedAssessmentCalls: [1]
+        )
+        let (runner, _) = try await makeRunner(backend: backend)
+        let submitter = MedicineAssessmentCaptureSubmitter(
+            runner: runner,
+            userHealthProfileProvider: { RunnerFixtures.profile },
+            medicationRecordsProvider: { [] }
+        )
+        let submission = Task {
+            try await submitter.process(RunnerFixtures.image)
+        }
+        await backend.waitForAssessments(1)
+
+        submission.cancel()
+        await backend.releaseAssessment(1)
+        let result = await submission.result
+
+        guard case .failure(let error) = result,
+              let failure = error as? MedicineCaptureProcessingFailure
+        else {
+            Issue.record("expected stable cancellation failure")
+            return
+        }
+        #expect(failure == .cancelled)
+        #expect(await backend.completedAssessmentCount == 1)
+        #expect(
+            try await submitter.process(RunnerFixtures.image)
+                == .submittedForAssessment
+        )
+        #expect(await backend.completedAssessmentCount == 2)
     }
 
     @Test func replacementStartCancelsAndJoinsPredecessorBeforeStartingNext()
@@ -39,8 +212,8 @@ struct MedicineAssessmentRunnerTests {
         #expect(await backend.requests.count == 1)
 
         await backend.releaseAssessment(1)
-        await second.value
-        await first.value
+        _ = await second.value
+        _ = await first.value
 
         #expect(await backend.requests.count == 2)
         #expect(await waitForGate(session, state: .result))
@@ -67,7 +240,7 @@ struct MedicineAssessmentRunnerTests {
 
         await backend.releaseAssessment(1)
         await stop.value
-        await start.value
+        _ = await start.value
         #expect(await stopped.isComplete)
         #expect(await backend.completedAssessmentCount == 1)
     }
@@ -100,7 +273,7 @@ struct MedicineAssessmentRunnerTests {
         await repeatedlyYield()
         await backend.releaseAssessment(1)
         _ = await (firstStop, secondStop)
-        await start.value
+        _ = await start.value
 
         let update = await coordinator.currentStateUpdate
         #expect(update.sequenceNumber == 3)
@@ -124,9 +297,9 @@ struct MedicineAssessmentRunnerTests {
         await repeatedlyYield()
         #expect(await backend.requests.count == 1)
         await backend.releaseAssessment(1)
-        await replacement.value
+        _ = await replacement.value
         await stop.value
-        await first.value
+        _ = await first.value
 
         #expect(await backend.requests.count == 2)
         #expect(await waitForGate(session, state: .result))
@@ -144,8 +317,8 @@ struct MedicineAssessmentRunnerTests {
         let replacementInvocation = try makeAssessmentInvocation(runner)
         let replacement = Task { await runner.start(replacementInvocation) }
         await backend.releaseAssessment(1)
-        await replacement.value
-        await first.value
+        _ = await replacement.value
+        _ = await first.value
 
         let requests = await backend.requests
         #expect(requests.count == 2)
@@ -169,8 +342,8 @@ struct MedicineAssessmentRunnerTests {
         let replacementInvocation = try makeAssessmentInvocation(runner)
         let replacement = Task { await runner.start(replacementInvocation) }
         await backend.releaseAssessment(1)
-        await replacement.value
-        await first.value
+        _ = await replacement.value
+        _ = await first.value
 
         #expect(session.assessmentGate?.latestUpdate?.sequenceNumber == 4)
         #expect(session.assessmentGate?.assessmentState.isResult == true)
@@ -453,8 +626,8 @@ struct MedicineAssessmentRunnerTests {
         await repeatedlyYield()
         #expect(await backend.requests.count == 1)
         await backend.releaseAssessment(1)
-        await replacement.value
-        await first.value
+        _ = await replacement.value
+        _ = await first.value
 
         let requests = await backend.requests
         #expect(requests.count == 2)
@@ -634,7 +807,7 @@ private func verifyBlockedGateReplacement(
     let stop = Task { await runner.stop() }
     await backend.releaseAssessment(1)
     await stop.value
-    await assessment.value
+    _ = await assessment.value
     #expect(session.assessmentGate?.latestUpdate == nil)
     #expect(session.canDepart == false)
     #expect(session.canCompleteMedicineCheck == false)
@@ -664,7 +837,7 @@ private func verifyQueuedStaleStart(
     let queuedEntered = MainActorEntryFlag()
     let queuedA = Task { @MainActor in
         queuedEntered.value = true
-        await runner.start(invocationA)
+        return await runner.start(invocationA)
     }
     #expect(await waitForEntry(queuedEntered))
     #expect(await backend.requests.count == 1)
@@ -675,8 +848,8 @@ private func verifyQueuedStaleStart(
     #expect(gateA.new == gateB.old)
     #expect(gateA.new != gateB.new)
     await backend.releaseAssessment(1)
-    await first.value
-    await queuedA.value
+    _ = await first.value
+    #expect(await queuedA.value == false)
 
     #expect(await recognizer.callCount == 1)
     #expect(await backend.requests.count == 1)
@@ -709,7 +882,7 @@ private func verifyValidQueuedStart(
     let queuedEntered = MainActorEntryFlag()
     let queued = Task { @MainActor in
         queuedEntered.value = true
-        await runner.start(queuedInvocation)
+        return await runner.start(queuedInvocation)
     }
     #expect(await waitForEntry(queuedEntered))
     #expect(await backend.requests.count == 1)
@@ -720,8 +893,8 @@ private func verifyValidQueuedStart(
     }
     await backend.releaseAssessment(1)
     await stop.value
-    await first.value
-    await queued.value
+    _ = await first.value
+    #expect(await queued.value)
 
     #expect(await backend.requests.count == 2)
     #expect(session.currentAssessmentGateLease == lease)
@@ -787,6 +960,17 @@ private func waitForGate(
             return true
         }
         await Task.yield()
+    }
+    return false
+}
+
+@MainActor
+private func waitForCaptureSubmission(
+    _ viewModel: MedicineCaptureViewModel
+) async -> Bool {
+    for await status in viewModel.$assessmentSubmissionStatus.values {
+        if status == .submitted { return true }
+        if case .failed = status { return false }
     }
     return false
 }
@@ -860,11 +1044,13 @@ private final class MainActorEntryFlag {
 
 private actor CountingMedicineRecognizer: MedicineTextRecognizing {
     private(set) var callCount = 0
+    private(set) var inputs: [OCRImageInput] = []
 
     func recognizeText(
         in input: OCRImageInput
     ) async throws -> [RecognizedTextObservation] {
         callCount += 1
+        inputs.append(input)
         return try await StaticMedicineRecognizer().recognizeText(in: input)
     }
 }

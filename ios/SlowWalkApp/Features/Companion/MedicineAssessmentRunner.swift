@@ -28,6 +28,7 @@ final class MedicineAssessmentRunner {
         let gateLease: MedicineAssessmentGateLease
         var expectedGeneration: UInt64?
         var confirmationSourceUpdate: MedicineAssessmentStateUpdate?
+        var didEnterAssessmentLifecycle = false
 
         init(
             requestID: UUID,
@@ -98,13 +99,16 @@ final class MedicineAssessmentRunner {
         )
     }
 
-    func start(_ invocation: AssessmentInvocation?) async {
+    @discardableResult
+    func start(_ invocation: AssessmentInvocation?) async -> Bool {
         guard let invocation,
               isCurrentAssessmentGate(invocation.gateLease)
-        else { return }
+        else { return false }
         await waitForStoppingBarrier()
 
-        guard isCurrentAssessmentGate(invocation.gateLease) else { return }
+        guard isCurrentAssessmentGate(invocation.gateLease) else {
+            return false
+        }
         let context = AssessmentContext(
             requestID: UUID(),
             gateLease: invocation.gateLease
@@ -143,6 +147,7 @@ final class MedicineAssessmentRunner {
                 return
             }
 
+            context.didEnterAssessmentLifecycle = true
             _ = await coordinator.assess(
                 imageInput: invocation.imageInput,
                 userProfile: invocation.userProfile,
@@ -152,6 +157,7 @@ final class MedicineAssessmentRunner {
         }
         lifecycleTail = task
         await task.value
+        return context.didEnterAssessmentLifecycle
     }
 
     /// Confirms an exact candidate from the current canonical response.

@@ -17,29 +17,53 @@ enum MedicineCaptureState: Equatable {
     case cameraUnavailable
 }
 
+enum MedicineAssessmentSubmissionStatus: Equatable {
+    case none
+    case submitted
+    case failed(MedicineCaptureProcessingFailure)
+}
+
 @MainActor
 final class MedicineCaptureViewModel: ObservableObject {
     @Published var state: MedicineCaptureState = .idle
+    @Published private(set) var assessmentSubmissionStatus:
+        MedicineAssessmentSubmissionStatus = .none
 
     let previewSource: CameraPreviewSource
     private let captureService: any CameraCaptureServicing
-    private let recognizer: any MedicineTextRecognizing
+    private let processor: any MedicineCaptureProcessing
 
     private var activeCaptureID: UUID?
     private var activeSessionID: UUID?
     private var captureTask: Task<Void, Never>?
-    private var recognitionTask: Task<Void, Never>?
+    private var processingTask: Task<Void, Never>?
+    private var processorCancellationTask: Task<Void, Never>?
+    private var processingGeneration: Int?
     private var currentGeneration = 0
 
     init(
+        processor: any MedicineCaptureProcessing,
+        previewSource: CameraPreviewSource = CameraPreviewSource(),
+        captureService: (any CameraCaptureServicing)? = nil
+    ) {
+        self.processor = processor
+        self.previewSource = previewSource
+        self.captureService = captureService
+            ?? previewSource.makeCaptureService()
+    }
+
+    convenience init(
         recognizer: any MedicineTextRecognizing,
         previewSource: CameraPreviewSource = CameraPreviewSource(),
         captureService: (any CameraCaptureServicing)? = nil
     ) {
-        self.recognizer = recognizer
-        self.previewSource = previewSource
-        self.captureService = captureService
-            ?? previewSource.makeCaptureService()
+        self.init(
+            processor: MedicineCaptureStandaloneOCRProcessor(
+                recognizer: recognizer
+            ),
+            previewSource: previewSource,
+            captureService: captureService
+        )
     }
 
     // MARK: - Session
@@ -71,8 +95,11 @@ final class MedicineCaptureViewModel: ObservableObject {
     // MARK: - Camera capture
 
     func capturePhoto() {
+        let replacedRequestID = activeCaptureID
+        activeCaptureID = nil
         captureTask?.cancel()
-        recognitionTask?.cancel()
+        captureTask = nil
+        _ = beginProcessingCancellation()
         currentGeneration &+= 1
         let generation = currentGeneration
         let requestID = UUID()
@@ -80,6 +107,15 @@ final class MedicineCaptureViewModel: ObservableObject {
         let orientation = cameraOrientation()
         let capturedAt = Date()
         state = .capturing
+        assessmentSubmissionStatus = .none
+
+        if let replacedRequestID {
+            Task {
+                await captureService.cancelPendingCapture(
+                    requestID: replacedRequestID
+                )
+            }
+        }
 
         captureTask = Task { [weak self, captureService] in
             guard let self else { return }
@@ -93,8 +129,8 @@ final class MedicineCaptureViewModel: ObservableObject {
                       self.currentGeneration == generation
                 else { return }
                 self.activeCaptureID = nil
-                self.startRecognition(
-                    with: OCRImageInput(data: result.imageData,
+                self.startProcessing(
+                    input: OCRImageInput(data: result.imageData,
                         orientation: result.orientation,
                         capturedAt: result.capturedAt),
                     generation: generation
@@ -116,12 +152,22 @@ final class MedicineCaptureViewModel: ObservableObject {
     func capture(
         imageData: Data, orientation: OCRImageOrientation, capturedAt: Date
     ) {
+        let replacedRequestID = activeCaptureID
         activeCaptureID = nil
-        cancelPendingTasks()
+        captureTask?.cancel()
+        captureTask = nil
+        _ = beginProcessingCancellation()
         currentGeneration &+= 1
         let gen = currentGeneration
-        startRecognition(
-            with: OCRImageInput(data: imageData, orientation: orientation,
+        if let replacedRequestID {
+            Task {
+                await captureService.cancelPendingCapture(
+                    requestID: replacedRequestID
+                )
+            }
+        }
+        startProcessing(
+            input: OCRImageInput(data: imageData, orientation: orientation,
                 capturedAt: capturedAt),
             generation: gen
         )
@@ -135,9 +181,9 @@ final class MedicineCaptureViewModel: ObservableObject {
         currentGeneration &+= 1
         captureTask?.cancel()
         captureTask = nil
-        recognitionTask?.cancel()
-        recognitionTask = nil
+        _ = beginProcessingCancellation()
         state = .cancelled
+        assessmentSubmissionStatus = .none
         if let requestID {
             Task {
                 await captureService.cancelPendingCapture(
@@ -155,25 +201,29 @@ final class MedicineCaptureViewModel: ObservableObject {
         currentGeneration &+= 1
         captureTask?.cancel()
         captureTask = nil
-        recognitionTask?.cancel()
-        recognitionTask = nil
+        let processorCancellation = beginProcessingCancellation()
         if let requestID {
             await captureService.cancelPendingCapture(
                 requestID: requestID
             )
         }
+        await processorCancellation?.value
         if let sessionID {
             await captureService.stop(sessionID: sessionID)
             previewSource.clearPreviewLayer(sessionID: sessionID)
         }
         state = .idle
+        assessmentSubmissionStatus = .none
     }
 
     func reset() {
         activeCaptureID = nil
-        cancelPendingTasks()
+        captureTask?.cancel()
+        captureTask = nil
+        _ = beginProcessingCancellation()
         currentGeneration &+= 1
         state = .idle
+        assessmentSubmissionStatus = .none
     }
 
     // MARK: - Permission
@@ -187,34 +237,47 @@ final class MedicineCaptureViewModel: ObservableObject {
         state = .recognitionFailed("photo_loading_failed")
     }
 
-    // MARK: - Recognition
+    // MARK: - Processing
 
-    private func startRecognition(
-        with input: OCRImageInput, generation: Int
+    private func startProcessing(
+        input: OCRImageInput, generation: Int
     ) {
         state = .recognizing(generation: generation)
-        recognitionTask = Task { [recognizer, weak self] in
+        assessmentSubmissionStatus = .none
+        processingGeneration = generation
+        let cancellationBarrier = processorCancellationTask
+        processingTask = Task { @MainActor [processor, weak self] in
+            await cancellationBarrier?.value
+            guard let self else { return }
             do {
-                let obs = try await recognizer.recognizeText(in: input)
+                let result = try await processor.process(input)
                 try Task.checkCancellation()
-                self?.handleRecognitionResult(
-                    observations: obs, generation: generation
+                self.handleProcessingResult(
+                    result, generation: generation
                 )
             } catch is CancellationError {
-                self?.handleCancellation(generation: generation)
+                self.handleCancellation(generation: generation)
             } catch {
-                self?.handleRecognitionFailure(
+                self.handleProcessingFailure(
                     error: error, generation: generation
                 )
             }
         }
     }
 
-    private func handleRecognitionResult(
-        observations: [RecognizedTextObservation], generation: Int
+    private func handleProcessingResult(
+        _ result: MedicineCaptureProcessingResult,
+        generation: Int
     ) {
         guard generation == currentGeneration else { return }
-        state = observations.isEmpty ? .noTextFound : .success(observations)
+        switch result {
+        case .recognized(let observations):
+            state = observations.isEmpty
+                ? .noTextFound
+                : .success(observations)
+        case .submittedForAssessment:
+            assessmentSubmissionStatus = .submitted
+        }
     }
 
     private func handleCancellation(generation: Int) {
@@ -222,10 +285,22 @@ final class MedicineCaptureViewModel: ObservableObject {
         if case .recognizing = state { state = .idle }
     }
 
-    private func handleRecognitionFailure(
+    private func handleProcessingFailure(
         error: Error, generation: Int
     ) {
         guard generation == currentGeneration else { return }
+        if let failure = error as? MedicineCaptureProcessingFailure {
+            switch failure {
+            case .cancelled:
+                handleCancellation(generation: generation)
+            case .assessmentGateUnavailable,
+                 .assessmentSubmissionRejected:
+                assessmentSubmissionStatus = .failed(failure)
+            case .processingFailed:
+                state = .recognitionFailed(failure.rawValue)
+            }
+            return
+        }
         let reason: String
         if let f = error as? AppleVisionMedicineTextRecognizer.Failure {
             switch f {
@@ -238,11 +313,22 @@ final class MedicineCaptureViewModel: ObservableObject {
 
     // MARK: - Helpers
 
-    private func cancelPendingTasks() {
-        captureTask?.cancel()
-        captureTask = nil
-        recognitionTask?.cancel()
-        recognitionTask = nil
+    @discardableResult
+    private func beginProcessingCancellation() -> Task<Void, Never>? {
+        processingTask?.cancel()
+        processingTask = nil
+        guard processingGeneration != nil else {
+            return processorCancellationTask
+        }
+        processingGeneration = nil
+        let predecessor = processorCancellationTask
+        let processor = processor
+        let task = Task { @MainActor in
+            await predecessor?.value
+            await processor.cancel()
+        }
+        processorCancellationTask = task
+        return task
     }
 
     private func cameraOrientation() -> OCRImageOrientation {

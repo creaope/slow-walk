@@ -1,3 +1,4 @@
+import Combine
 import Foundation
 import os
 import SlowWalkClientCore
@@ -14,6 +15,7 @@ private actor FakeCameraCaptureService: CameraCaptureServicing {
     }
     private var pending: [UUID: Pending] = [:]
     private var captureStartedWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
+    private var pendingRequestIDWaiters: [CheckedContinuation<UUID, Never>] = []
     private var activeSessionID: UUID?
     private(set) var startIDs: [UUID] = []
     private(set) var stopIDs: [UUID] = []
@@ -39,6 +41,11 @@ private actor FakeCameraCaptureService: CameraCaptureServicing {
             pending[requestID] = Pending(
                 requestID: requestID, continuation: continuation
             )
+            let requestIDWaiters = pendingRequestIDWaiters
+            pendingRequestIDWaiters.removeAll()
+            for waiter in requestIDWaiters {
+                waiter.resume(returning: requestID)
+            }
             if let waiters = captureStartedWaiters.removeValue(
                 forKey: requestID
             ) {
@@ -62,6 +69,13 @@ private actor FakeCameraCaptureService: CameraCaptureServicing {
 
     func hasPendingCapture(requestID: UUID) -> Bool {
         pending[requestID] != nil
+    }
+
+    func nextPendingRequestID() async -> UUID {
+        if let requestID = pending.keys.first { return requestID }
+        return await withCheckedContinuation {
+            pendingRequestIDWaiters.append($0)
+        }
     }
 
     func complete(requestID: UUID, data: Data) {
@@ -91,6 +105,36 @@ private final class SpyRecognizer: MedicineTextRecognizing, Sendable {
         return try await _result(input)
     }
     var callCount: Int { callCountBox.withLock { $0 } }
+}
+
+@MainActor
+private final class SpyCaptureProcessor: MedicineCaptureProcessing {
+    private let processResult: @MainActor (OCRImageInput) async throws ->
+        MedicineCaptureProcessingResult
+    private let cancellation: @MainActor () async -> Void
+    private(set) var inputs: [OCRImageInput] = []
+    private(set) var cancelCallCount = 0
+
+    init(
+        processResult: @escaping @MainActor (OCRImageInput) async throws ->
+            MedicineCaptureProcessingResult,
+        cancellation: @escaping @MainActor () async -> Void = {}
+    ) {
+        self.processResult = processResult
+        self.cancellation = cancellation
+    }
+
+    func process(
+        _ input: OCRImageInput
+    ) async throws -> MedicineCaptureProcessingResult {
+        inputs.append(input)
+        return try await processResult(input)
+    }
+
+    func cancel() async {
+        cancelCallCount += 1
+        await cancellation()
+    }
 }
 
 // MARK: - Gate
@@ -144,10 +188,38 @@ private nonisolated func makeObs(
 
 private func img(_ id: String = "img") -> Data { Data(id.utf8) }
 
+@MainActor
+private func waitForSubmission(
+    _ viewModel: MedicineCaptureViewModel
+) async -> Bool {
+    for await status in viewModel.$assessmentSubmissionStatus.values {
+        if status == .submitted { return true }
+        if case .failed = status { return false }
+    }
+    return false
+}
+
 // MARK: - Tests
 
 @Suite("MedicineCaptureViewModel")
 struct MedicineCaptureViewModelTests {
+
+    @Test func standaloneProcessorCallsRecognizerExactlyOnce() async throws {
+        let recognizer = SpyRecognizer { _ in [makeObs()] }
+        let processor = MedicineCaptureStandaloneOCRProcessor(
+            recognizer: recognizer
+        )
+
+        let result = try await processor.process(
+            OCRImageInput(
+                data: img(), orientation: .left,
+                capturedAt: Date(timeIntervalSince1970: 100)
+            )
+        )
+
+        #expect(result == .recognized([makeObs()]))
+        #expect(recognizer.callCount == 1)
+    }
 
     @Test func initialStateIsIdle() {
         let vm = MedicineCaptureViewModel(
@@ -177,6 +249,130 @@ struct MedicineCaptureViewModelTests {
         while case .recognizing = vm.state { await Task.yield() }
         #expect(vm.state == .noTextFound)
         #expect(spy.callCount == 1)
+    }
+
+    @Test func photosPickerInputUsesProcessingContractWithoutCaptureSuccess()
+        async
+    {
+        let processor = SpyCaptureProcessor { _ in
+            .submittedForAssessment
+        }
+        let vm = MedicineCaptureViewModel(processor: processor)
+        let input = OCRImageInput(
+            data: img("photo"), orientation: .downMirrored,
+            capturedAt: Date(timeIntervalSince1970: 321)
+        )
+
+        vm.capture(
+            imageData: input.data,
+            orientation: input.orientation,
+            capturedAt: input.capturedAt
+        )
+        #expect(await waitForSubmission(vm))
+
+        #expect(processor.inputs == [input])
+        #expect(vm.assessmentSubmissionStatus == .submitted)
+        guard case .recognizing = vm.state else {
+            Issue.record("assessment handoff must remain recognizing")
+            return
+        }
+    }
+
+    @Test func cameraInputUsesSameProcessingContractAndCaptureMetadata()
+        async throws
+    {
+        let camera = FakeCameraCaptureService()
+        let processor = SpyCaptureProcessor { _ in
+            .submittedForAssessment
+        }
+        let vm = MedicineCaptureViewModel(
+            processor: processor, captureService: camera
+        )
+
+        vm.capturePhoto()
+        let requestID = await camera.nextPendingRequestID()
+        await camera.complete(requestID: requestID, data: img("camera"))
+        #expect(await waitForSubmission(vm))
+
+        #expect(processor.inputs == [
+            OCRImageInput(
+                data: img("camera"), orientation: .up,
+                capturedAt: Date(timeIntervalSince1970: 100)
+            ),
+        ])
+        #expect(vm.assessmentSubmissionStatus == .submitted)
+        guard case .recognizing = vm.state else {
+            Issue.record("assessment handoff must not publish OCR success")
+            return
+        }
+    }
+
+    @Test func repeatedCancelStopsProcessorOnceAndRejectsLateSubmission()
+        async
+    {
+        let gate = CaptureGate()
+        let cancellationGate = CaptureGate()
+        let completionGate = CaptureGate()
+        let processor = SpyCaptureProcessor(
+            processResult: { _ in
+                await gate.wait()
+                completionGate.open()
+                return .submittedForAssessment
+            },
+            cancellation: { await cancellationGate.wait() }
+        )
+        let vm = MedicineCaptureViewModel(processor: processor)
+        vm.capture(
+            imageData: img(), orientation: .up,
+            capturedAt: Date(timeIntervalSince1970: 100)
+        )
+        await gate.waitUntilEntered()
+
+        vm.cancel()
+        vm.cancel()
+        await cancellationGate.waitUntilEntered()
+        cancellationGate.open()
+        gate.open()
+        await completionGate.wait()
+
+        #expect(processor.cancelCallCount == 1)
+        #expect(vm.state == .cancelled)
+        #expect(vm.assessmentSubmissionStatus == .none)
+    }
+
+    @Test func dismissWaitsForProcessorCancellationAndIsRepeatable() async {
+        let processGate = CaptureGate()
+        let completionGate = CaptureGate()
+        let cancellationGate = CaptureGate()
+        let processor = SpyCaptureProcessor(
+            processResult: { _ in
+                await processGate.wait()
+                completionGate.open()
+                return .submittedForAssessment
+            },
+            cancellation: { await cancellationGate.wait() }
+        )
+        let vm = MedicineCaptureViewModel(processor: processor)
+        vm.capture(
+            imageData: img(), orientation: .up,
+            capturedAt: Date(timeIntervalSince1970: 100)
+        )
+        await processGate.waitUntilEntered()
+
+        let dismiss = Task { await vm.dismiss() }
+        await cancellationGate.waitUntilEntered()
+        guard case .recognizing = vm.state else {
+            Issue.record("dismiss returned before processor cancellation")
+            return
+        }
+        cancellationGate.open()
+        await dismiss.value
+        await vm.dismiss()
+        processGate.open()
+        await completionGate.wait()
+
+        #expect(processor.cancelCallCount == 1)
+        #expect(vm.state == .idle)
     }
 
     @Test func recognitionFailure() async {
