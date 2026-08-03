@@ -10,6 +10,7 @@
 		7C153878301849410049DF05 /* SlowWalkAPIContracts in Frameworks */ = {isa = PBXBuildFile; productRef = 7C153877301849410049DF05 /* SlowWalkAPIContracts */; };
 		7C15387A301849410049DF05 /* SlowWalkClientCore in Frameworks */ = {isa = PBXBuildFile; productRef = 7C153879301849410049DF05 /* SlowWalkClientCore */; };
 		7C15387C301849410049DF05 /* SlowWalkDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 7C15387B301849410049DF05 /* SlowWalkDomain */; };
+		7C153884301850F80049DF05 /* SlowWalkPresentation in Frameworks */ = {isa = PBXBuildFile; productRef = 7C153883301850F80049DF05 /* SlowWalkPresentation */; };
 		7CFA0B010000000000000010 /* SlowWalkDomain in Frameworks */ = {isa = PBXBuildFile; productRef = 7CFA0B020000000000000011 /* SlowWalkDomain */; };
 		7CFA0B100000000000000010 /* SlowWalkWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = 7CFA0B110000000000000001 /* SlowWalkWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		7CFA0B200000000000000020 /* SlowWalkActivityAttributes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CFA0B220000000000000022 /* SlowWalkActivityAttributes.swift */; };
@@ -104,6 +105,7 @@
 				7C15387C301849410049DF05 /* SlowWalkDomain in Frameworks */,
 				7C15387A301849410049DF05 /* SlowWalkClientCore in Frameworks */,
 				7C153878301849410049DF05 /* SlowWalkAPIContracts in Frameworks */,
+				7C153884301850F80049DF05 /* SlowWalkPresentation in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -179,6 +181,7 @@
 				7C153877301849410049DF05 /* SlowWalkAPIContracts */,
 				7C153879301849410049DF05 /* SlowWalkClientCore */,
 				7C15387B301849410049DF05 /* SlowWalkDomain */,
+				7C153883301850F80049DF05 /* SlowWalkPresentation */,
 			);
 			productName = SlowWalkApp;
 			productReference = 7C96080A3018333F0081BCFA /* SlowWalkApp.app */;
@@ -261,6 +264,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				7C153876301849410049DF05 /* XCLocalSwiftPackageReference "../swift-packages/SlowWalkCore" */,
+				7C153882301850F80049DF05 /* XCLocalSwiftPackageReference "../swift-packages/SlowWalkPresentation" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 7C96080B3018333F0081BCFA /* Products */;
@@ -701,6 +705,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "../swift-packages/SlowWalkCore";
 		};
+		7C153882301850F80049DF05 /* XCLocalSwiftPackageReference "../swift-packages/SlowWalkPresentation" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../swift-packages/SlowWalkPresentation";
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -715,6 +723,10 @@
 		7C15387B301849410049DF05 /* SlowWalkDomain */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = SlowWalkDomain;
+		};
+		7C153883301850F80049DF05 /* SlowWalkPresentation */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = SlowWalkPresentation;
 		};
 		7CFA0B020000000000000011 /* SlowWalkDomain */ = {
 			isa = XCSwiftPackageProductDependency;
