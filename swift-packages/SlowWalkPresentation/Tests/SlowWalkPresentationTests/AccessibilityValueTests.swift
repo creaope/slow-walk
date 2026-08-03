@@ -297,6 +297,17 @@ final class AccessibilityValueTests: XCTestCase {
         )
     }
 
+    func test_idleAssessmentText_isLocalized() {
+        let visibleText = MedicinePresentationCopy.idleText
+
+        XCTAssertEqual(visibleText, "尚未开始药品评估。")
+        XCTAssertFalse(
+            visibleText.contains(
+                "No medicine assessment has been started."
+            )
+        )
+    }
+
     // MARK: - mustConfirmMedicine independent label
 
     func test_mustConfirmLabel_isNonEmptyAndAccessible() {

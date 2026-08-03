@@ -53,7 +53,7 @@ public enum MedicinePresentationCopy {
     // MARK: - Progress and lifecycle
 
     public static let idleText =
-        "No medicine assessment has been started."
+        "尚未开始药品评估。"
     public static let recognizingText =
         "Reading the medicine label."
     public static let assessingText =
