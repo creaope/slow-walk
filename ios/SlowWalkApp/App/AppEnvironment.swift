@@ -17,6 +17,7 @@ final class AppEnvironment {
     let clock: any SlowWalkDomain.Clock
     let plan: TodayPlan
     let careRecords: InMemoryCareRecordStore
+    let careActionShownRecorder: CareActionShownRecorder
     let companion: CompanionSessionModel
     let medicineAssessmentRunner: MedicineAssessmentRunner
 
@@ -42,8 +43,11 @@ final class AppEnvironment {
 
         let store = InMemoryCareRecordStore(clock: clock)
         careRecords = store
+        let careActionShownRecorder = CareActionShownRecorder(records: store)
+        self.careActionShownRecorder = careActionShownRecorder
         let companion = CompanionSessionModel(
             records: store,
+            careActionShownRecorder: careActionShownRecorder,
             simulator: simulator,
             plan: plan,
             capabilities: capabilities

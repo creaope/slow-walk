@@ -70,6 +70,9 @@ struct CompanionFlowStateCoverageTests {
         case retakeMedicinePhoto
         case confirmMedicine
         case medicineAssessmentStateDidUpdate
+        case medicineAssessmentResultDidDisplay
+        case continueToOuting
+        case completeMedicineCheck
         case reconsiderMedicineChoice
         case approachStop
         case arriveSafely
@@ -87,6 +90,9 @@ struct CompanionFlowStateCoverageTests {
         case .retakeMedicinePhoto: .retakeMedicinePhoto
         case .confirmMedicine: .confirmMedicine
         case .medicineAssessmentStateDidUpdate: .medicineAssessmentStateDidUpdate
+        case .medicineAssessmentResultDidDisplay: .medicineAssessmentResultDidDisplay
+        case .continueToOuting: .continueToOuting
+        case .completeMedicineCheck: .completeMedicineCheck
         case .reconsiderMedicineChoice: .reconsiderMedicineChoice
         case .approachStop: .approachStop
         case .arriveSafely: .arriveSafely

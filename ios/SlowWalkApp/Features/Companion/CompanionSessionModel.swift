@@ -1,4 +1,5 @@
 import Foundation
+import SlowWalkAPIContracts
 import SlowWalkClientCore
 
 struct MedicineAssessmentGateLease: Equatable, Sendable {
@@ -25,6 +26,7 @@ final class CompanionSessionModel {
     private(set) var currentAssessmentGateLease: MedicineAssessmentGateLease?
 
     private let records: any CareRecordStoring
+    private let careActionShownRecorder: CareActionShownRecorder
     private let simulator: any MedicineScanSimulating
     private let readDelay: any MedicineReadDelaying
     private let plan: TodayPlan
@@ -51,12 +53,14 @@ final class CompanionSessionModel {
 
     init(
         records: any CareRecordStoring,
+        careActionShownRecorder: CareActionShownRecorder,
         simulator: any MedicineScanSimulating = MockMedicineScanSimulator.demo,
         plan: TodayPlan,
         readDelay: any MedicineReadDelaying = ContinuousMedicineReadDelay(),
         capabilities: CapabilityCatalog
     ) {
         self.records = records
+        self.careActionShownRecorder = careActionShownRecorder
         self.simulator = simulator
         self.readDelay = readDelay
         self.plan = plan
@@ -97,12 +101,12 @@ final class CompanionSessionModel {
 
     /// Whether the session may leave for the outing.
     ///
-    /// True only when a formal assessment has produced a `.result` AND an
-    /// outing is planned. The session remains at the gate in C1 — this is
-    /// qualification, not an automatic transition.
+    /// True only when the current canonical `.result` was actually displayed
+    /// and an outing is planned. This is qualification, not an automatic
+    /// transition.
     var canDepart: Bool {
         guard let gate = assessmentGate,
-              case .result = gate.assessmentState,
+              gate.hasDisplayedCurrentResult,
               plan.outing != nil
         else { return false }
         return true
@@ -110,12 +114,12 @@ final class CompanionSessionModel {
 
     /// Whether a medicine-only session has earned its completion qualification.
     ///
-    /// True only when a formal assessment has produced a `.result` AND no
-    /// outing is planned. The session stays at the gate — this is
-    /// qualification, not an automatic transition.
+    /// True only when the current canonical `.result` was actually displayed
+    /// and no outing is planned. The session stays at the gate until explicit
+    /// completion.
     var canCompleteMedicineCheck: Bool {
         guard let gate = assessmentGate,
-              case .result = gate.assessmentState,
+              gate.hasDisplayedCurrentResult,
               plan.outing == nil
         else { return false }
         return true
@@ -237,8 +241,8 @@ final class CompanionSessionModel {
     /// medicine assessment runner. The session never owns the coordinator.
     ///
     /// The reducer rejects stale or duplicate updates by `sequenceNumber`.
-    /// No care record is written here — `careActionShown` may only be written
-    /// once a real result has been displayed, which is not part of C1.
+    /// No care record is written here — `careActionShown` is written only by
+    /// `medicineAssessmentResultDidDisplay()` after a real render.
     func applyAssessmentStateUpdate(_ update: MedicineAssessmentStateUpdate) {
         guard let lease = currentAssessmentGateLease else { return }
         applyAssessmentStateUpdate(update, forGateLease: lease)
@@ -252,6 +256,46 @@ final class CompanionSessionModel {
               currentAssessmentGateLease == lease
         else { return }
         guard send(.medicineAssessmentStateDidUpdate(update)) else { return }
+    }
+
+    /// Acknowledges that the current canonical result was actually displayed.
+    ///
+    /// The request ID and medicine name are deliberately derived from the live
+    /// gate so a caller cannot record or unlock a different result. Receiving a
+    /// result alone never calls this method and therefore has no display side
+    /// effect.
+    @discardableResult
+    func medicineAssessmentResultDidDisplay() -> Bool {
+        guard let gate = assessmentGate,
+              case let .result(presentation) = gate.assessmentState
+        else { return false }
+
+        let requestID = presentation.response.requestID
+        guard send(.medicineAssessmentResultDidDisplay(requestID)) else {
+            return false
+        }
+        _ = careActionShownRecorder.recordDisplayed(
+            requestID: requestID,
+            medicineName: gate.confirmed.candidate.displayName
+        )
+        return true
+    }
+
+    /// Explicitly leaves the assessment gate for a planned outing.
+    @discardableResult
+    func continueToOuting() -> Bool {
+        guard canDepart else { return false }
+        return send(.continueToOuting, gateLeaseChange: .invalidate)
+    }
+
+    /// Explicitly finishes a session whose plan contains medicine only.
+    @discardableResult
+    func completeMedicineCheck() -> Bool {
+        guard canCompleteMedicineCheck,
+              send(.completeMedicineCheck, gateLeaseChange: .invalidate)
+        else { return false }
+        records.append(.companionFinished(.completedMedicineCheck))
+        return true
     }
 
     func installAssessmentGateInvalidationHandler(

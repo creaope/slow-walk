@@ -1,4 +1,5 @@
 import Foundation
+import SlowWalkAPIContracts
 import SlowWalkClientCore
 
 /// The single place where companion flow transitions are decided.
@@ -8,13 +9,9 @@ import SlowWalkClientCore
 /// `CompanionSessionModel`, which keeps this logic reviewable and testable on
 /// its own.
 ///
-/// - Important: `.travelling` is currently unreachable from the assessment gate,
-///   and that is the point. Departure is only legitimate after a formal medicine
-///   assessment has produced a result and that result has been displayed, and
-///   neither the display callback nor the result-to-travel transition exist in
-///   C1. The `.travelling` → `.approachingStop` → `.completed` transitions are
-///   kept because they are correct and tested; they simply have no entry from
-///   the gate until the display path exists.
+/// - Important: `.travelling` and medicine-only completion are reachable from
+///   the assessment gate only after the current canonical result's request ID
+///   has been acknowledged as actually displayed.
 ///
 /// - Note: The project builds with `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`,
 ///   so this type is main-actor isolated like the rest of the app. It holds no
@@ -97,7 +94,8 @@ enum CompanionFlowReducer {
                         origin: prompt.origin
                     ),
                     prompt: prompt,
-                    latestUpdate: nil
+                    latestUpdate: nil,
+                    displayedResultRequestID: nil
                 )
             )
 
@@ -119,8 +117,8 @@ enum CompanionFlowReducer {
             }
             // Every canonical case is accepted and stored; the gate itself
             // remains the session state regardless of which case it is.
-            // Only `.result` earns departure qualification — and even that
-            // does not transition out of the gate in C1.
+            // A `.result` alone does not earn qualification. Its request ID
+            // must also be acknowledged by the display event below.
             switch update.state {
             case .idle, .recognizing, .requiresMedicineConfirmation,
                  .assessing, .result, .failed, .cancelled:
@@ -130,9 +128,35 @@ enum CompanionFlowReducer {
                 MedicineAssessmentGate(
                     confirmed: gate.confirmed,
                     prompt: gate.prompt,
-                    latestUpdate: update
+                    latestUpdate: update,
+                    displayedResultRequestID: gate.displayedResultRequestID
                 )
             )
+
+        case let (
+            .awaitingMedicineAssessment(gate),
+            .medicineAssessmentResultDidDisplay(requestID)
+        ):
+            guard case let .result(presentation) = gate.assessmentState,
+                  presentation.response.requestID == requestID,
+                  gate.displayedResultRequestID != requestID
+            else { return nil }
+            return .awaitingMedicineAssessment(
+                MedicineAssessmentGate(
+                    confirmed: gate.confirmed,
+                    prompt: gate.prompt,
+                    latestUpdate: gate.latestUpdate,
+                    displayedResultRequestID: requestID
+                )
+            )
+
+        case let (.awaitingMedicineAssessment(gate), .continueToOuting):
+            guard gate.hasDisplayedCurrentResult else { return nil }
+            return .travelling
+
+        case let (.awaitingMedicineAssessment(gate), .completeMedicineCheck):
+            guard gate.hasDisplayedCurrentResult else { return nil }
+            return .completed(.completedMedicineCheck)
 
         case let (.awaitingMedicineAssessment(gate), .reconsiderMedicineChoice):
             // The gate is never a dead end: the candidate list it came from is
@@ -148,14 +172,6 @@ enum CompanionFlowReducer {
                     setback: nil
                 )
             )
-
-        // There is deliberately no transition out of
-        // `.awaitingMedicineAssessment` into `.travelling`. Departure requires
-        // a real assessment result to have been displayed and acknowledged,
-        // and the display callback does not exist in C1. The only ways on from
-        // the gate are to choose again, read again, or end the session.
-        // Adding a departure path here without a displayed result is the
-        // exact defect this state exists to prevent.
 
         case (.travelling, .approachStop):
             return .approachingStop

@@ -109,6 +109,8 @@ struct CareRecordsView: View {
             switch completion {
             case .arrivedSafely:
                 "陪伴结束：已安全到达"
+            case .completedMedicineCheck:
+                "陪伴结束：已完成用药检查"
             case .endedEarly:
                 "陪伴结束：提前结束"
             }

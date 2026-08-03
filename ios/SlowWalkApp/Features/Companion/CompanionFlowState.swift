@@ -1,4 +1,5 @@
 import Foundation
+import SlowWalkAPIContracts
 import SlowWalkClientCore
 
 /// Why a medicine photo could not be read.
@@ -69,7 +70,8 @@ struct ConfirmedMedicine: Equatable, Hashable {
 /// mistaken for an assessed *medicine*: confirmation answers "which box is
 /// this", which is not an answer to "is it safe to take". Nothing downstream —
 /// no action card, no care-action record, no departure — may happen from here
-/// without a real assessment result.
+/// without a real assessment result, and flow continuation additionally
+/// requires acknowledgement that the current result was actually displayed.
 ///
 /// The gate stores the latest canonical `MedicineAssessmentStateUpdate` accepted
 /// by the reducer. `latestUpdate` is `nil` when no update has been received yet,
@@ -84,10 +86,34 @@ struct MedicineAssessmentGate: Equatable {
     /// The latest canonical state update accepted. `nil` means no update has
     /// been received — equivalent to `.idle`.
     let latestUpdate: MedicineAssessmentStateUpdate?
+    /// The canonical result that the presentation layer most recently reported
+    /// as actually displayed. Qualification compares this identity with the
+    /// current result so a different result cannot inherit acknowledgement.
+    let displayedResultRequestID: UUID?
+
+    init(
+        confirmed: ConfirmedMedicine,
+        prompt: MedicineConfirmationPrompt,
+        latestUpdate: MedicineAssessmentStateUpdate?,
+        displayedResultRequestID: UUID? = nil
+    ) {
+        self.confirmed = confirmed
+        self.prompt = prompt
+        self.latestUpdate = latestUpdate
+        self.displayedResultRequestID = displayedResultRequestID
+    }
 
     /// The current canonical assessment state, defaulting to `.idle`.
     var assessmentState: MedicineAssessmentViewState {
         latestUpdate?.state ?? .idle
+    }
+
+    /// Whether the canonical result currently held by this gate was displayed.
+    var hasDisplayedCurrentResult: Bool {
+        guard case let .result(presentation) = assessmentState else {
+            return false
+        }
+        return displayedResultRequestID == presentation.response.requestID
     }
 
     /// True once the person is being offered a way out rather than a wait.
@@ -104,11 +130,9 @@ struct MedicineAssessmentGate: Equatable {
 
 /// How a companion session finished.
 ///
-/// `.completedMedicineCheck` is deliberately not yet defined. It gates the
-/// medicine-only completion path — a future phase will add it together with
-/// the transition that enters it, once the result-display callback exists.
 enum CompanionCompletion: Equatable, Hashable {
     case arrivedSafely
+    case completedMedicineCheck
     case endedEarly
 }
 
@@ -118,12 +142,13 @@ enum CompanionCompletion: Equatable, Hashable {
 /// assessment. Risk wording, severity and colour belong to
 /// `SlowWalkPresentation` and are deliberately absent here.
 ///
-/// There is deliberately no state that shows a care action. The state that used
-/// to do so, `showingRiskAction(ConfirmedMedicine)`, carried only a medicine
-/// *name*, which let the flow present a care action and permit departure on the
-/// strength of a confirmed name alone. It is replaced by
-/// `awaitingMedicineAssessment`. When a real assessment result exists, the
-/// showing state returns carrying that result — never just a name.
+/// There is deliberately no App-owned state that presents a care action. The
+/// state that used to do so, `showingRiskAction(ConfirmedMedicine)`, carried
+/// only a medicine *name*, which let the flow present a care action and permit
+/// departure on the strength of a confirmed name alone. It is replaced by
+/// `awaitingMedicineAssessment`. The external result presenter reports actual
+/// display back through the request-ID-bound event while the gate stays the
+/// single flow authority.
 ///
 /// `Equatable` only — no `Hashable` usage exists in this build.
 enum CompanionFlowState: Equatable {
@@ -172,9 +197,17 @@ enum CompanionFlowEvent: Equatable {
     ///
     /// The update carries a monotonic `sequenceNumber` so the reducer can
     /// reject stale or duplicate deliveries. All seven canonical cases are
-    /// accepted and stored; only `.result` earns departure qualification,
-    /// and even then the session stays at the gate in C1.
+    /// accepted and stored. A `.result` remains blocked until its own request
+    /// ID is acknowledged by `medicineAssessmentResultDidDisplay`.
     case medicineAssessmentStateDidUpdate(MedicineAssessmentStateUpdate)
+    /// Raised only after the current canonical result has actually rendered.
+    /// The session derives the request identifier from that result; callers do
+    /// not supply one.
+    case medicineAssessmentResultDidDisplay(UUID)
+    /// Explicitly continues an outing after the current result was displayed.
+    case continueToOuting
+    /// Explicitly completes a medicine-only session after display.
+    case completeMedicineCheck
     /// Goes back to the candidate list to pick a different medicine.
     case reconsiderMedicineChoice
     case approachStop

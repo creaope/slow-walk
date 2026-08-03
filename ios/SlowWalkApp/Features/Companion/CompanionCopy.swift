@@ -57,6 +57,7 @@ enum CompanionCopy {
         case let .completed(completion):
             switch completion {
             case .arrivedSafely: "已安全结束"
+            case .completedMedicineCheck: "已完成用药检查"
             case .endedEarly: "已提前结束"
             }
         }
@@ -130,6 +131,8 @@ enum CompanionCopy {
             switch completion {
             case .arrivedSafely:
                 "今天的行程已经结束。"
+            case .completedMedicineCheck:
+                "今天的用药检查已经完成。"
             case .endedEarly:
                 "这次陪伴已经结束，随时可以重新开始。"
             }
