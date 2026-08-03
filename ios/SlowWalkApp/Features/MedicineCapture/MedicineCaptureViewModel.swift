@@ -74,6 +74,7 @@ final class MedicineCaptureViewModel: ObservableObject {
     private var activePhotoLoadID: UUID?
     private var isPhotosPickerPresented = false
     private var cameraPreparationTask: Task<Void, Never>?
+    private var cameraPreparationGeneration = 0
     private var captureTask: Task<Void, Never>?
     private var processingTask: Task<Void, Never>?
     private var processorCancellationTask: Task<Void, Never>?
@@ -119,7 +120,7 @@ final class MedicineCaptureViewModel: ObservableObject {
 
     // MARK: - Session
 
-    func startSession() async throws {
+    func startSession(preparationGeneration: Int? = nil) async throws {
         guard activeSessionID == nil else { return }
         let sessionID = UUID()
         activeSessionID = sessionID
@@ -136,7 +137,9 @@ final class MedicineCaptureViewModel: ObservableObject {
             throw error
         }
 
-        guard activeSessionID == sessionID else {
+        guard activeSessionID == sessionID,
+              preparationGeneration.map(ownsCameraPreparation) ?? true
+        else {
             await captureService.stop(sessionID: sessionID)
             return
         }
@@ -462,49 +465,69 @@ final class MedicineCaptureViewModel: ObservableObject {
 
     private func beginPermissionRequest() {
         let permissionProvider = permissionProvider
+        cameraPreparationGeneration &+= 1
+        let generation = cameraPreparationGeneration
         state = .requestingPermission
         cameraPreparationTask = Task { @MainActor [weak self] in
             let granted = await permissionProvider.requestAccess()
-            guard let self, !Task.isCancelled else { return }
+            guard let self,
+                  self.ownsCameraPreparation(generation)
+            else { return }
 
             guard granted else {
                 self.applyCurrentCameraAvailability()
-                self.cameraPreparationTask = nil
+                self.finishCameraPreparation(generation)
                 return
             }
             guard permissionProvider.isCameraAvailable else {
                 self.state = .cameraUnavailable
-                self.cameraPreparationTask = nil
+                self.finishCameraPreparation(generation)
                 return
             }
             self.state = .startingCamera
-            await self.startAuthorizedCamera()
+            await self.startAuthorizedCamera(generation: generation)
         }
     }
 
     private func beginAuthorizedCameraStart() {
+        cameraPreparationGeneration &+= 1
+        let generation = cameraPreparationGeneration
         state = .startingCamera
         cameraPreparationTask = Task { @MainActor [weak self] in
-            await self?.startAuthorizedCamera()
+            await self?.startAuthorizedCamera(generation: generation)
         }
     }
 
-    private func startAuthorizedCamera() async {
-        guard !Task.isCancelled else { return }
+    private func startAuthorizedCamera(generation: Int) async {
+        guard ownsCameraPreparation(generation) else { return }
         do {
-            try await startSession()
+            try await startSession(preparationGeneration: generation)
+            guard ownsCameraPreparation(generation) else { return }
         } catch is CancellationError {
             return
         } catch CameraCaptureFailure.permissionDenied {
+            guard ownsCameraPreparation(generation) else { return }
             state = .permissionDenied
         } catch {
+            guard ownsCameraPreparation(generation) else { return }
             state = .cameraUnavailable
         }
-        guard !Task.isCancelled else { return }
+        finishCameraPreparation(generation)
+    }
+
+    private func ownsCameraPreparation(_ generation: Int) -> Bool {
+        !Task.isCancelled
+            && cameraPreparationGeneration == generation
+            && cameraPreparationTask != nil
+    }
+
+    private func finishCameraPreparation(_ generation: Int) {
+        guard ownsCameraPreparation(generation) else { return }
         cameraPreparationTask = nil
     }
 
     private func invalidateCameraPreparation() {
+        cameraPreparationGeneration &+= 1
         cameraPreparationTask?.cancel()
         cameraPreparationTask = nil
     }

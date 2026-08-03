@@ -10,25 +10,40 @@ import Testing
 // MARK: - Fake Camera
 
 private actor FakeCameraCaptureService: CameraCaptureServicing {
+    enum StartOutcome {
+        case success
+        case permissionDenied
+        case configurationFailed
+    }
+
     struct Pending {
         let requestID: UUID
         let continuation: CheckedContinuation<CameraCaptureResult, Error>
     }
     private var pending: [UUID: Pending] = [:]
+    private var pendingStarts: [
+        UUID: CheckedContinuation<Void, Error>
+    ] = [:]
     private var captureStartedWaiters: [UUID: [CheckedContinuation<Void, Never>]] = [:]
     private var pendingRequestIDWaiters: [CheckedContinuation<UUID, Never>] = []
     private var startWaiters: [(
         count: Int, continuation: CheckedContinuation<Void, Never>
     )] = []
+    private var stopCallWaiters: [(
+        count: Int, continuation: CheckedContinuation<Void, Never>
+    )] = []
     private let stopGate: CaptureGate?
+    private let gatesStarts: Bool
     private var activeSessionID: UUID?
     private(set) var startIDs: [UUID] = []
+    private(set) var stopCallIDs: [UUID] = []
     private(set) var stopIDs: [UUID] = []
     private(set) var cancelledIDs: [UUID] = []
     private(set) var captureIDs: [UUID] = []
 
-    init(stopGate: CaptureGate? = nil) {
+    init(stopGate: CaptureGate? = nil, gatesStarts: Bool = false) {
         self.stopGate = stopGate
+        self.gatesStarts = gatesStarts
     }
 
     func start(sessionID: UUID) async throws {
@@ -37,9 +52,20 @@ private actor FakeCameraCaptureService: CameraCaptureServicing {
         let waiters = startWaiters.filter { $0.count <= startIDs.count }
         startWaiters.removeAll { $0.count <= startIDs.count }
         for waiter in waiters { waiter.continuation.resume() }
+        if gatesStarts {
+            try await withCheckedThrowingContinuation {
+                pendingStarts[sessionID] = $0
+            }
+        }
     }
 
     func stop(sessionID: UUID) async {
+        stopCallIDs.append(sessionID)
+        let callWaiters = stopCallWaiters.filter {
+            $0.count <= stopCallIDs.count
+        }
+        stopCallWaiters.removeAll { $0.count <= stopCallIDs.count }
+        for waiter in callWaiters { waiter.continuation.resume() }
         guard activeSessionID == sessionID else { return }
         stopIDs.append(sessionID)
         if let stopGate { await stopGate.wait() }
@@ -55,6 +81,31 @@ private actor FakeCameraCaptureService: CameraCaptureServicing {
         if startIDs.count >= count { return }
         await withCheckedContinuation {
             startWaiters.append((count: count, continuation: $0))
+        }
+    }
+
+    func resolveStart(sessionID: UUID, outcome: StartOutcome) {
+        guard let continuation = pendingStarts.removeValue(
+            forKey: sessionID
+        ) else { return }
+        switch outcome {
+        case .success:
+            continuation.resume()
+        case .permissionDenied:
+            continuation.resume(
+                throwing: CameraCaptureFailure.permissionDenied
+            )
+        case .configurationFailed:
+            continuation.resume(
+                throwing: CameraCaptureFailure.configurationFailed
+            )
+        }
+    }
+
+    func waitUntilStopCallCount(_ count: Int) async {
+        if stopCallIDs.count >= count { return }
+        await withCheckedContinuation {
+            stopCallWaiters.append((count: count, continuation: $0))
         }
     }
 
@@ -123,6 +174,7 @@ private final class ControllableCameraPermissionProvider:
     private(set) var requestCount = 0
     private var result = false
     private let requestGate = CaptureGate()
+    private let requestReturnedGate = CaptureGate()
 
     init(
         state: AVAuthorizationStatus,
@@ -135,11 +187,16 @@ private final class ControllableCameraPermissionProvider:
     func requestAccess() async -> Bool {
         requestCount += 1
         await requestGate.wait()
+        requestReturnedGate.open()
         return result
     }
 
     func waitUntilRequested() async {
         await requestGate.waitUntilEntered()
+    }
+
+    func waitUntilRequestReturned() async {
+        await requestReturnedGate.wait()
     }
 
     func resolve(
@@ -275,6 +332,15 @@ private func waitForRecognitionResult(
         }
     }
     return viewModel.state
+}
+
+@MainActor
+private func waitForCameraReady(
+    _ viewModel: MedicineCaptureViewModel
+) async {
+    for await state in viewModel.$state.values {
+        if state == .ready { return }
+    }
 }
 
 // MARK: - Tests
@@ -920,6 +986,222 @@ struct MedicineCaptureViewModelTests {
         #expect(vm.isCameraSessionStarted)
         #expect(await camera.cancelledIDs == [requestID])
         #expect(await camera.stopIDs.count == 1)
+    }
+
+    @Test func staleStartFailureDoesNotOverwriteNewPhotoLoad()
+        async throws
+    {
+        let permission = ControllableCameraPermissionProvider(
+            state: .authorized
+        )
+        let camera = FakeCameraCaptureService(gatesStarts: true)
+        let processor = SpyCaptureProcessor { _ in
+            .recognized([makeObs()])
+        }
+        let vm = MedicineCaptureViewModel(
+            processor: processor,
+            captureService: camera,
+            permissionProvider: permission
+        )
+
+        #expect(vm.beginCameraPresentation())
+        await camera.waitUntilStartCount(1)
+        let startIDs = await camera.startIDs
+        let sessionA = try #require(startIDs.first)
+        #expect(vm.state == .startingCamera)
+
+        let cleanup = vm.prepareForBackground()
+        #expect(vm.state == .idle)
+        let teardown = Task {
+            await vm.finishBackgroundCleanup(cleanup)
+        }
+        await teardown.value
+        vm.appDidBecomeActive()
+
+        let loadID = try #require(vm.beginPhotoLoading())
+        let loadingState = vm.state
+        guard case .loadingPhoto = loadingState else {
+            Issue.record("new photo load did not start")
+            return
+        }
+
+        await camera.resolveStart(
+            sessionID: sessionA,
+            outcome: .configurationFailed
+        )
+        await camera.waitUntilStopCallCount(2)
+        await Task.yield()
+
+        #expect(vm.state == loadingState)
+        #expect(vm.submitLoadedPhoto(
+            loadID: loadID,
+            imageData: img("photo-after-stale-start"),
+            orientation: .up,
+            capturedAt: Date(timeIntervalSince1970: 200)
+        ))
+        #expect(await waitForRecognitionResult(vm)
+            == .success([makeObs()]))
+        #expect(processor.inputs.map(\.data) == [
+            img("photo-after-stale-start"),
+        ])
+        #expect(vm.submitLoadedPhoto(
+            loadID: loadID,
+            imageData: img("duplicate"),
+            orientation: .up,
+            capturedAt: Date(timeIntervalSince1970: 300)
+        ) == false)
+    }
+
+    @Test func stalePermissionErrorDoesNotOverwriteNewCameraSession()
+        async throws
+    {
+        let permission = ControllableCameraPermissionProvider(
+            state: .authorized
+        )
+        let camera = FakeCameraCaptureService(gatesStarts: true)
+        let recognizer = SpyRecognizer { _ in [makeObs()] }
+        let vm = MedicineCaptureViewModel(
+            recognizer: recognizer,
+            captureService: camera,
+            permissionProvider: permission
+        )
+
+        #expect(vm.beginCameraPresentation())
+        await camera.waitUntilStartCount(1)
+        let firstStartIDs = await camera.startIDs
+        let sessionA = try #require(firstStartIDs.first)
+        let cleanup = vm.prepareForBackground()
+        let teardown = Task {
+            await vm.finishBackgroundCleanup(cleanup)
+        }
+        await teardown.value
+
+        vm.appDidBecomeActive()
+        #expect(vm.beginCameraPresentation())
+        await camera.waitUntilStartCount(2)
+        let startIDs = await camera.startIDs
+        let sessionB = try #require(startIDs.last)
+        #expect(sessionB != sessionA)
+        await camera.resolveStart(sessionID: sessionB, outcome: .success)
+        await waitForCameraReady(vm)
+        #expect(vm.isCameraSessionStarted)
+        #expect(await camera.currentSessionID() == sessionB)
+
+        await camera.resolveStart(
+            sessionID: sessionA,
+            outcome: .permissionDenied
+        )
+        await camera.waitUntilStopCallCount(2)
+        await Task.yield()
+
+        #expect(vm.state == .ready)
+        #expect(vm.isCameraSessionStarted)
+        #expect(await camera.currentSessionID() == sessionB)
+        vm.capturePhoto()
+        let requestID = await camera.nextPendingRequestID()
+        await camera.complete(
+            requestID: requestID,
+            data: img("camera-after-stale-start")
+        )
+        _ = await waitForRecognitionResult(vm)
+        #expect(recognizer.callCount == 1)
+        #expect(await camera.captureIDs == [requestID])
+        await vm.dismiss()
+    }
+
+    @Test func staleStartCompletionDoesNotClearNewPreparationLock()
+        async throws
+    {
+        let permission = ControllableCameraPermissionProvider(
+            state: .authorized
+        )
+        let camera = FakeCameraCaptureService(gatesStarts: true)
+        let vm = MedicineCaptureViewModel(
+            recognizer: SpyRecognizer { _ in [] },
+            captureService: camera,
+            permissionProvider: permission
+        )
+
+        #expect(vm.beginCameraPresentation())
+        await camera.waitUntilStartCount(1)
+        let firstStartIDs = await camera.startIDs
+        let sessionA = try #require(firstStartIDs.first)
+        let cleanup = vm.prepareForBackground()
+        let teardown = Task {
+            await vm.finishBackgroundCleanup(cleanup)
+        }
+        await teardown.value
+
+        vm.appDidBecomeActive()
+        #expect(vm.beginCameraPresentation())
+        await camera.waitUntilStartCount(2)
+        let startIDs = await camera.startIDs
+        let sessionB = try #require(startIDs.last)
+        #expect(vm.state == .startingCamera)
+
+        await camera.resolveStart(
+            sessionID: sessionA,
+            outcome: .configurationFailed
+        )
+        await camera.waitUntilStopCallCount(2)
+        await Task.yield()
+
+        #expect(vm.state == .startingCamera)
+        #expect(vm.beginCameraPresentation() == false)
+        #expect(await camera.startIDs.count == 2)
+
+        await camera.resolveStart(sessionID: sessionB, outcome: .success)
+        await waitForCameraReady(vm)
+        #expect(vm.state == .ready)
+        #expect(await camera.startIDs.count == 2)
+        await vm.dismiss()
+    }
+
+    @Test func stalePermissionResultDoesNotOverwriteNewPhotoLoad()
+        async throws
+    {
+        let permission = ControllableCameraPermissionProvider(
+            state: .notDetermined
+        )
+        let camera = FakeCameraCaptureService()
+        let processor = SpyCaptureProcessor { _ in
+            .recognized([makeObs()])
+        }
+        let vm = MedicineCaptureViewModel(
+            processor: processor,
+            captureService: camera,
+            permissionProvider: permission
+        )
+
+        #expect(vm.beginCameraPresentation())
+        await permission.waitUntilRequested()
+        #expect(vm.state == .requestingPermission)
+        let cleanup = vm.prepareForBackground()
+        let teardown = Task {
+            await vm.finishBackgroundCleanup(cleanup)
+        }
+        await teardown.value
+
+        vm.appDidBecomeActive()
+        let loadID = try #require(vm.beginPhotoLoading())
+        let loadingState = vm.state
+        permission.resolve(true, state: .authorized)
+        await permission.waitUntilRequestReturned()
+        await Task.yield()
+
+        #expect(vm.state == loadingState)
+        #expect(await camera.startIDs.isEmpty)
+        #expect(vm.submitLoadedPhoto(
+            loadID: loadID,
+            imageData: img("photo-after-stale-permission"),
+            orientation: .up,
+            capturedAt: Date(timeIntervalSince1970: 200)
+        ))
+        #expect(await waitForRecognitionResult(vm)
+            == .success([makeObs()]))
+        #expect(processor.inputs.map(\.data) == [
+            img("photo-after-stale-permission"),
+        ])
     }
 
     @Test func notDeterminedRapidTapRequestsOnceAndStartsOnce() async {
