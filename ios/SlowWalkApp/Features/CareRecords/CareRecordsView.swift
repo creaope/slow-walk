@@ -1,10 +1,6 @@
 import SwiftUI
 
-/// The timeline of what happened while accompanying someone.
-///
-/// Records describe the process, not a medical outcome. A read that did not
-/// succeed is recorded as an event with a recovery path, never as a conclusion
-/// about a medicine.
+/// The factual timeline of one companion session.
 struct CareRecordsView: View {
     @Environment(AppEnvironment.self) private var environment
 
@@ -12,68 +8,105 @@ struct CareRecordsView: View {
         environment.careRecords.events
     }
 
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
-                DemoDataBanner()
-
-                if events.isEmpty {
-                    emptyState
-                } else {
-                    ForEach(events) { event in
-                        row(for: event)
-                    }
-                }
-
-                // From the app-level capability source, not a fixed string: if
-                // records ever become persistent, this line changes with the
-                // table instead of being corrected here.
-                Text(
-                    environment.capabilities
-                        .detail(of: .careRecordPersistence)
-                        ?? "记录只保存在内存中，重新启动后会清空。"
-                )
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-            }
-            .padding()
-        }
+    private var persistenceStatus: CapabilityStatus {
+        environment.capabilities.status(of: .careRecordPersistence)
     }
 
-    private var emptyState: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("还没有记录")
-                .font(.headline)
-            Text("开始一次陪伴之后，这里会按时间记录每一步。")
-                .font(.body)
-                .foregroundStyle(.secondary)
+    var body: some View {
+        List {
+            Section {
+                DemoDataBanner()
+                    .slowWalkReadableContent()
+            }
+
+            if events.isEmpty {
+                Section {
+                    ContentUnavailableView(
+                        "还没有记录",
+                        systemImage: "clock.badge.questionmark",
+                        description: Text("开始一次陪伴之后，这里会按时间记录每一步。")
+                    )
+                    .slowWalkReadableContent()
+                }
+            } else {
+                Section("陪伴过程") {
+                    ForEach(events) { event in
+                        row(for: event)
+                            .slowWalkReadableContent()
+                    }
+                }
+            }
+
+            Section("记录说明") {
+                Label {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("守护记录保存")
+                            .font(.headline)
+                        Text(persistenceStatus.shortLabel)
+                            .foregroundStyle(.secondary)
+                        if let detail = persistenceStatus.detail {
+                            Text(detail)
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                    }
+                } icon: {
+                    Image(systemName: "internaldrive")
+                        .foregroundStyle(.tint)
+                        .accessibilityHidden(true)
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(persistenceStatus.summaryLine)
+                .slowWalkReadableContent()
+            }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
+        .listStyle(.insetGrouped)
     }
 
     private func row(for event: CareRecordEvent) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(Self.timeFormatter.string(from: event.occurredAt))
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Text(Self.description(for: event.kind))
-                .font(.body)
-                .fixedSize(horizontal: false, vertical: true)
+        let time = event.occurredAt.formatted(Self.timeStyle)
+
+        return Label {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(time)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Text(Self.description(for: event.kind))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+        } icon: {
+            Image(systemName: Self.systemImage(for: event.kind))
+                .foregroundStyle(.tint)
+                .accessibilityHidden(true)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding()
-        .background(.quaternary, in: RoundedRectangle(cornerRadius: 10))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            "\(Self.timeFormatter.string(from: event.occurredAt))，"
-                + Self.description(for: event.kind)
-        )
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(time)，\(Self.description(for: event.kind))")
     }
 
-    // MARK: - Wording
+    private static func systemImage(for kind: CareRecordEventKind) -> String {
+        switch kind {
+        case .dayPlanItemStarted:
+            "calendar.badge.clock"
+        case .medicineReadStarted:
+            "camera.viewfinder"
+        case .medicineReadDidNotSucceed:
+            "arrow.clockwise.circle"
+        case .medicineReadFoundCandidates:
+            "list.bullet.rectangle"
+        case .medicineConfirmed:
+            "checkmark.circle"
+        case .medicineAssessmentDidNotSucceed:
+            "exclamationmark.arrow.triangle.2.circlepath"
+        case .careActionShown:
+            "rectangle.and.text.magnifyingglass"
+        case .companionFinished:
+            "flag.checkered"
+        }
+    }
 
-    /// Neutral, factual descriptions. Nothing here blames the person.
+    /// Neutral descriptions of recorded events, never medical conclusions.
     static func description(for kind: CareRecordEventKind) -> String {
         switch kind {
         case let .dayPlanItemStarted(title):
@@ -94,15 +127,12 @@ struct CareRecordsView: View {
         case let .medicineConfirmed(medicineName, origin):
             switch origin {
             case .readFromPhoto:
-                "已确认药名：\(medicineName)（模拟识别后确认）"
+                "已确认药名：\(medicineName)"
             case .chosenFromFrequentList:
                 "已确认药名：\(medicineName)（从常用药名选择）"
             }
-        case let .medicineAssessmentDidNotSucceed(reason):
-            switch reason {
-            case .capabilityNotAvailableYet:
-                "尚未完成用药风险评估：设备内评估将在下一阶段接入"
-            }
+        case .medicineAssessmentDidNotSucceed:
+            "用药评估未能完成，未显示用药提示"
         case let .careActionShown(medicineName):
             "已显示\(medicineName)的用药提示"
         case let .companionFinished(completion):
@@ -117,17 +147,26 @@ struct CareRecordsView: View {
         }
     }
 
-    private static let timeFormatter: DateFormatter = {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        return formatter
-    }()
+    private static let timeStyle = Date.FormatStyle(
+        date: .omitted,
+        time: .shortened
+    )
 }
 
-#Preview {
+#Preview("Empty") {
     NavigationStack {
         CareRecordsView()
             .navigationTitle("守护记录")
     }
     .environment(AppEnvironment.preview())
+}
+
+#Preview("Dark AX5") {
+    NavigationStack {
+        CareRecordsView()
+            .navigationTitle("守护记录")
+    }
+    .environment(AppEnvironment.preview())
+    .preferredColorScheme(.dark)
+    .dynamicTypeSize(.accessibility5)
 }

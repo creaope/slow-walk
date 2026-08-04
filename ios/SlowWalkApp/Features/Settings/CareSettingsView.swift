@@ -1,87 +1,116 @@
 import SwiftUI
 
-/// Skeleton for care settings.
-///
-/// Nothing here is persisted yet, and that is stated on screen rather than
-/// implied. Real persistence waits for protected storage: `ios/README.md`
-/// records that the current JSON repository has no Apple Data Protection, so
-/// real health data must not be written.
+/// Read-only care settings for the current demo build.
 struct CareSettingsView: View {
     @Environment(AppEnvironment.self) private var environment
 
-    /// Session-only, so nothing suggests a saved preference.
-    @State private var preferredName: String = ""
-    @State private var prefersLargerText = false
-    @State private var prefersSpokenReminders = false
+    private var contactStatus: CapabilityStatus {
+        environment.capabilities.status(of: .trustedContacts)
+    }
 
     var body: some View {
         Form {
             Section {
                 DemoDataBanner()
+                    .slowWalkReadableContent()
             }
 
             Section("称呼") {
-                TextField(
-                    "希望我们怎么称呼您",
-                    text: $preferredName,
-                    prompt: Text(environment.plan.preferredName)
+                LabeledContent {
+                    VStack(alignment: .trailing, spacing: 2) {
+                        Text(environment.plan.preferredName)
+                            .fontWeight(.semibold)
+                        Text("演示内容，只读")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                } label: {
+                    Label("当前称呼", systemImage: "person.text.rectangle")
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(
+                    "当前称呼，\(environment.plan.preferredName)，演示内容，只读"
                 )
-                .accessibilityLabel("希望我们怎么称呼您")
-                Text("称呼由您决定，我们不会代替您设定。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-            }
+                .slowWalkReadableContent()
 
-            Section("提示方式") {
-                // Neither switch is connected yet. Leaving them tappable would
-                // present a setting that silently does nothing, so they are
-                // disabled and the reason is stated on screen.
-                Toggle("使用更大的字号", isOn: $prefersLargerText)
-                    .disabled(true)
-                Toggle("重要提示同时朗读", isOn: $prefersSpokenReminders)
-                    .disabled(true)
-                Text("这两项尚未接入。字号目前跟随系统的“显示与文字大小”设置，朗读功能将在后续阶段接入。")
+                Text("当前称呼来自演示计划，本阶段暂不可修改。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
+                    .slowWalkReadableContent()
             }
 
-            Section("紧急联系人") {
-                CapabilityStatusRow(
-                    status: environment.capabilities.status(of: .trustedContacts)
-                )
-                Text("可以联系谁由您自己决定。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            Section("显示与辅助功能") {
+                LabeledContent {
+                    Text("跟随系统")
+                        .foregroundStyle(.secondary)
+                } label: {
+                    Label("文字大小", systemImage: "textformat.size")
+                }
+                .slowWalkReadableContent()
+
+                LabeledContent {
+                    Text("跟随系统")
+                        .foregroundStyle(.secondary)
+                } label: {
+                    Label("粗体与对比度", systemImage: "accessibility")
+                }
+                .slowWalkReadableContent()
             }
 
-            // The honest capability list, and the entry point for checking it.
-            // Read from `environment.capabilities` — the same value the
-            // companion session runs against — so this section and the in-flow
-            // wording cannot disagree: there is one table, and changing a
-            // capability's real state changes both at once.
-            Section("当前能力状态") {
-                CapabilityStatusList(catalog: environment.capabilities)
-                Text("此列表说明各项能力当前的实现方式，不说明用药是否安全。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            Section("信任联系人") {
+                LabeledContent {
+                    Text(contactStatus.shortLabel)
+                        .foregroundStyle(.secondary)
+                } label: {
+                    Label(
+                        "联系人",
+                        systemImage: "person.crop.circle.badge.exclamationmark"
+                    )
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(contactStatus.summaryLine)
+                .slowWalkReadableContent()
+
+                if let detail = contactStatus.detail {
+                    Text(detail)
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .slowWalkReadableContent()
+                }
             }
 
-            Section("关于") {
-                NotADiagnosisNotice()
-                Text("本阶段的设置只在本次运行内有效，尚未保存到设备。")
-                    .font(.footnote)
-                    .foregroundStyle(.secondary)
+            Section("说明") {
+                NavigationLink {
+                    SafetyInformationView()
+                } label: {
+                    Label(
+                        "安全与使用说明",
+                        systemImage: "shield.lefthalf.filled"
+                    )
+                }
+                .accessibilityHint("查看演示数据、功能边界和数据保存说明。")
+                .slowWalkReadableContent()
             }
         }
     }
 }
 
-#Preview {
+#Preview("Light") {
     NavigationStack {
         CareSettingsView()
             .navigationTitle("关怀设置")
     }
     .environment(AppEnvironment.preview())
+}
+
+#Preview("Dark AX5") {
+    NavigationStack {
+        CareSettingsView()
+            .navigationTitle("关怀设置")
+    }
+    .environment(AppEnvironment.preview())
+    .preferredColorScheme(.dark)
+    .dynamicTypeSize(.accessibility5)
 }

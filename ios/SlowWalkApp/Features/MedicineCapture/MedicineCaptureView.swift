@@ -167,9 +167,12 @@ struct MedicineCaptureView: View {
         VStack {
             Spacer()
             HStack(spacing: 24) {
-                if case .failed = viewModel.assessmentSubmissionStatus {
+                switch viewModel.assessmentSubmissionStatus {
+                case .submitted:
+                    EmptyView()
+                case .failed:
                     retryButton
-                } else {
+                case .none:
                     switch viewModel.state {
                     case .idle:
                         cameraButton; photosPickerButton
@@ -188,7 +191,6 @@ struct MedicineCaptureView: View {
                     case .success, .noTextFound,
                          .recognitionFailed, .cancelled:
                         retryButton
-                    default: EmptyView()
                     }
                 }
             }.padding(.bottom, 40)
