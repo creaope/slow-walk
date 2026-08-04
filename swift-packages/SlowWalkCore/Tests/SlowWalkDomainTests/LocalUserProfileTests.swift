@@ -27,10 +27,22 @@ final class LocalUserProfileTests: XCTestCase {
         XCTAssertEqual(bundle.updatedAt, updatedAt)
         XCTAssertEqual(bundle.healthProfile.id, id)
         XCTAssertEqual(bundle.healthProfile.age, 72)
-        XCTAssertEqual(bundle.healthProfile.allergies, ["Penicillin"])
+        XCTAssertEqual(
+            bundle.unresolvedAllergyDescriptions,
+            ["Penicillin"]
+        )
+        XCTAssertEqual(bundle.healthProfile.allergies, [])
         XCTAssertEqual(
             bundle.healthProfile.diagnosedConditions,
             ["Hypertension"]
+        )
+        XCTAssertEqual(
+            bundle.unresolvedMedicineNames,
+            ["Daily Tablet"]
+        )
+        XCTAssertEqual(
+            bundle.healthProfile.currentMedicineIngredientIDs,
+            []
         )
         XCTAssertNil(bundle.healthProfile.bodyMetrics)
         XCTAssertEqual(bundle.healthProfile.createdAt, createdAt)
@@ -92,9 +104,10 @@ final class LocalUserProfileTests: XCTestCase {
         let bundle = try validate(draft)
 
         XCTAssertEqual(
-            bundle.healthProfile.allergies,
+            bundle.unresolvedAllergyDescriptions,
             ["Penicillin", "Pollen"]
         )
+        XCTAssertEqual(bundle.healthProfile.allergies, [])
         XCTAssertEqual(
             bundle.healthProfile.diagnosedConditions,
             ["Hypertension", "Diabetes"]
@@ -124,6 +137,30 @@ final class LocalUserProfileTests: XCTestCase {
         )
     }
 
+    func testFreeFormAllergiesRemainUnresolved() throws {
+        let bundle = try validate(
+            UserProfileDraft(
+                preferredName: "Lin",
+                ageText: "72",
+                allergies: [
+                    " Penicillin reaction ",
+                    "Peanut allergy",
+                    "Unverified medicine alias",
+                ]
+            )
+        )
+
+        XCTAssertEqual(
+            bundle.unresolvedAllergyDescriptions,
+            [
+                "Penicillin reaction",
+                "Peanut allergy",
+                "Unverified medicine alias",
+            ]
+        )
+        XCTAssertEqual(bundle.healthProfile.allergies, [])
+    }
+
     func testTextAndGroupLimitsAreEnforced() {
         assertIssue(
             .preferredNameTooLong,
@@ -141,6 +178,14 @@ final class LocalUserProfileTests: XCTestCase {
             )
         )
         assertIssue(
+            .tooManyAllergies,
+            for: UserProfileDraft(
+                preferredName: "Lin",
+                ageText: "72",
+                allergies: (0 ... 30).map { "allergy-\($0)" }
+            )
+        )
+        assertIssue(
             .tooManyCurrentMedicineNames,
             for: UserProfileDraft(
                 preferredName: "Lin",
@@ -155,7 +200,7 @@ final class LocalUserProfileTests: XCTestCase {
         let draft = UserProfileDraft(
             preferredName: "Lin",
             ageText: "72",
-            diagnosedConditions: [
+            allergies: [
                 String(repeating: sensitiveText, count: 5),
             ]
         )
@@ -166,7 +211,7 @@ final class LocalUserProfileTests: XCTestCase {
         } catch let issue as UserProfileValidationIssue {
             XCTAssertEqual(
                 issue,
-                .diagnosedConditionTooLong(index: 0)
+                .allergyTooLong(index: 0)
             )
             XCTAssertFalse(issue.description.contains(sensitiveText))
             XCTAssertFalse(String(describing: issue).contains(sensitiveText))
@@ -199,6 +244,11 @@ final class LocalUserProfileTests: XCTestCase {
         )
 
         XCTAssertEqual(decoded, original)
+        XCTAssertEqual(
+            decoded.unresolvedAllergyDescriptions,
+            ["Pollen"]
+        )
+        XCTAssertEqual(decoded.healthProfile.allergies, [])
     }
 
     private func validate(

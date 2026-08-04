@@ -16,6 +16,7 @@ public struct LocalUserProfileBundle:
     public let source: UserProfileSource
     public let preferredName: String
     public let healthProfile: UserHealthProfile
+    public let unresolvedAllergyDescriptions: [String]
     public let unresolvedMedicineNames: [String]
     public let createdAt: Date
     public let updatedAt: Date
@@ -25,6 +26,7 @@ public struct LocalUserProfileBundle:
         source: UserProfileSource,
         preferredName: String,
         healthProfile: UserHealthProfile,
+        unresolvedAllergyDescriptions: [String],
         unresolvedMedicineNames: [String],
         createdAt: Date,
         updatedAt: Date
@@ -33,6 +35,8 @@ public struct LocalUserProfileBundle:
         self.source = source
         self.preferredName = preferredName
         self.healthProfile = healthProfile
+        self.unresolvedAllergyDescriptions =
+            unresolvedAllergyDescriptions
         self.unresolvedMedicineNames = unresolvedMedicineNames
         self.createdAt = createdAt
         self.updatedAt = updatedAt
@@ -134,7 +138,9 @@ public struct UserProfileDraftValidator: Sendable {
             throw UserProfileValidationIssue.ageOutOfRange
         }
 
-        let allergies = try cleanItems(
+        // Free-form allergy text is preserved for later review/resolution.
+        // It is not treated as canonical risk-engine input.
+        let unresolvedAllergyDescriptions = try cleanItems(
             draft.allergies,
             tooLongIssue: UserProfileValidationIssue.allergyTooLong,
             tooManyIssue: .tooManyAllergies
@@ -155,7 +161,7 @@ public struct UserProfileDraftValidator: Sendable {
         let healthProfile = UserHealthProfile(
             id: id,
             age: age,
-            allergies: allergies,
+            allergies: [],
             diagnosedConditions: diagnosedConditions,
             currentMedicineIngredientIDs: [],
             bodyMetrics: nil,
@@ -166,6 +172,8 @@ public struct UserProfileDraftValidator: Sendable {
             source: .userEnteredLocal,
             preferredName: preferredName,
             healthProfile: healthProfile,
+            unresolvedAllergyDescriptions:
+                unresolvedAllergyDescriptions,
             unresolvedMedicineNames: medicineNames,
             createdAt: createdAt,
             updatedAt: updatedAt
