@@ -125,40 +125,55 @@ struct ProtectedFileLocalUserProfileStoreTests {
         }
     }
 
-    @Test func fileAndDirectoryUseCompleteProtection() async throws {
+    @Test func saveRequestsProtectionInSafetyOrder() async throws {
         let directory = temporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
-        try await makeStore(at: directory).saveCurrentProfile(
+        let protector = RecordingLocalProfileFileProtector()
+        try await makeStore(
+            at: directory,
+            fileProtector: protector
+        ).saveCurrentProfile(
             makeBundle(token: 1, preferredName: "Lin")
         )
 
-        let fileValues = try profileURL(in: directory).resourceValues(
-            forKeys: [.fileProtectionKey]
-        )
-        let directoryValues = try directory.resourceValues(
-            forKeys: [.fileProtectionKey]
-        )
-
-        #expect(fileValues.fileProtection == .complete)
-        #expect(directoryValues.fileProtection == .complete)
+        let fileURL = profileURL(in: directory)
+        #expect(await protector.recordedOperations() == [
+            .protectDirectory(directory),
+            .protectFile(fileURL),
+            .excludeFromBackup(fileURL),
+        ])
+        #expect(FileManager.default.fileExists(atPath: fileURL.path))
     }
 
-    @Test func savedFileIsExcludedFromBackup() async throws {
+    @Test func defaultStoreUsesAppleFileProtector() async {
         let directory = temporaryDirectory()
-        defer { try? FileManager.default.removeItem(at: directory) }
-        let store = makeStore(at: directory)
+        let store = ProtectedFileLocalUserProfileStore(
+            baseDirectory: directory
+        )
+        let protector = await store.fileProtector
 
-        try await store.saveCurrentProfile(
-            makeBundle(token: 1, preferredName: "First")
-        )
-        try await store.saveCurrentProfile(
-            makeBundle(token: 2, preferredName: "Second")
-        )
+        #expect(protector is AppleLocalProfileFileProtector)
+    }
 
-        let values = try profileURL(in: directory).resourceValues(
-            forKeys: [.isExcludedFromBackupKey]
+    @Test func directoryProtectionFailureIsFailClosed() async {
+        await assertProtectionFailure(
+            .directory,
+            expected: .directoryProtectionFailed
         )
-        #expect(values.isExcludedFromBackup == true)
+    }
+
+    @Test func fileProtectionFailureIsFailClosed() async {
+        await assertProtectionFailure(
+            .file,
+            expected: .protectionFailed
+        )
+    }
+
+    @Test func backupExclusionFailureIsFailClosed() async {
+        await assertProtectionFailure(
+            .backup,
+            expected: .backupExclusionFailed
+        )
     }
 
     @Test func errorsDoNotContainProfileContents() async throws {
@@ -199,21 +214,105 @@ struct ProtectedFileLocalUserProfileStoreTests {
     }
 
     private func makeStore(
-        at directory: URL
+        at directory: URL,
+        fileProtector: any LocalProfileFileProtecting =
+            TestLocalProfileFileProtector()
     ) -> ProtectedFileLocalUserProfileStore {
-        ProtectedFileLocalUserProfileStore(baseDirectory: directory)
+        ProtectedFileLocalUserProfileStore(
+            baseDirectory: directory,
+            fileProtector: fileProtector
+        )
+    }
+
+    private func assertProtectionFailure(
+        _ failure: RecordingLocalProfileFileProtector.Failure,
+        expected: ProtectedLocalUserProfileStoreError
+    ) async {
+        let directory = temporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let protector = RecordingLocalProfileFileProtector(
+            failure: failure
+        )
+        let store = makeStore(
+            at: directory,
+            fileProtector: protector
+        )
+        let sensitiveValues = [
+            "Private Name",
+            "72",
+            "Private condition",
+            "Secret allergy",
+            "Secret medicine",
+        ]
+        let profile = makeBundle(
+            token: 1,
+            preferredName: sensitiveValues[0],
+            diagnosedCondition: sensitiveValues[2],
+            allergyDescription: sensitiveValues[3],
+            medicineName: sensitiveValues[4]
+        )
+
+        do {
+            try await store.saveCurrentProfile(profile)
+            Issue.record("Expected protection failure.")
+        } catch {
+            #expect(
+                error as? ProtectedLocalUserProfileStoreError == expected
+            )
+            for description in [
+                String(describing: error),
+                error.localizedDescription,
+            ] {
+                for sensitiveValue in sensitiveValues {
+                    #expect(!description.contains(sensitiveValue))
+                }
+            }
+        }
+
+        let fileURL = profileURL(in: directory)
+        #expect(!FileManager.default.fileExists(atPath: fileURL.path))
+        #expect(
+            await protector.recordedOperations()
+                == expectedOperations(
+                    before: failure,
+                    directory: directory,
+                    fileURL: fileURL
+                )
+        )
+    }
+
+    private func expectedOperations(
+        before failure: RecordingLocalProfileFileProtector.Failure,
+        directory: URL,
+        fileURL: URL
+    ) -> [RecordingLocalProfileFileProtector.Operation] {
+        switch failure {
+        case .directory:
+            [.protectDirectory(directory)]
+        case .file:
+            [.protectDirectory(directory), .protectFile(fileURL)]
+        case .backup:
+            [
+                .protectDirectory(directory),
+                .protectFile(fileURL),
+                .excludeFromBackup(fileURL),
+            ]
+        }
     }
 
     private func makeBundle(
         token: UInt8,
         preferredName: String,
-        schemaVersion: Int = LocalUserProfileBundle.currentSchemaVersion
+        schemaVersion: Int = LocalUserProfileBundle.currentSchemaVersion,
+        diagnosedCondition: String = "Hypertension",
+        allergyDescription: String = "Pollen note",
+        medicineName: String = "Daily Tablet"
     ) -> LocalUserProfileBundle {
         let healthProfile = UserHealthProfile(
             id: fixedUUID(token: token),
             age: 72,
             allergies: [],
-            diagnosedConditions: ["Hypertension"],
+            diagnosedConditions: [diagnosedCondition],
             currentMedicineIngredientIDs: [],
             bodyMetrics: nil,
             updatedAt: timestamp,
@@ -224,8 +323,8 @@ struct ProtectedFileLocalUserProfileStoreTests {
             source: .userEnteredLocal,
             preferredName: preferredName,
             healthProfile: healthProfile,
-            unresolvedAllergyDescriptions: ["Pollen note"],
-            unresolvedMedicineNames: ["Daily Tablet"],
+            unresolvedAllergyDescriptions: [allergyDescription],
+            unresolvedMedicineNames: [medicineName],
             createdAt: timestamp,
             updatedAt: timestamp
         )
@@ -267,5 +366,61 @@ struct ProtectedFileLocalUserProfileStoreTests {
                 0, 0, 0, 0, 0, 0, 0, token
             )
         )
+    }
+}
+
+private struct TestLocalProfileFileProtector:
+    LocalProfileFileProtecting
+{
+    func protectDirectory(at url: URL) async throws {}
+    func protectFile(at url: URL) async throws {}
+    func excludeFromBackup(_ url: URL) async throws {}
+}
+
+private actor RecordingLocalProfileFileProtector:
+    LocalProfileFileProtecting
+{
+    enum Operation: Sendable, Equatable {
+        case protectDirectory(URL)
+        case protectFile(URL)
+        case excludeFromBackup(URL)
+    }
+
+    enum Failure: Error, Sendable, Equatable {
+        case directory
+        case file
+        case backup
+    }
+
+    private let failure: Failure?
+    private var operations: [Operation] = []
+
+    init(failure: Failure? = nil) {
+        self.failure = failure
+    }
+
+    func protectDirectory(at url: URL) async throws {
+        operations.append(.protectDirectory(url))
+        if failure == .directory {
+            throw Failure.directory
+        }
+    }
+
+    func protectFile(at url: URL) async throws {
+        operations.append(.protectFile(url))
+        if failure == .file {
+            throw Failure.file
+        }
+    }
+
+    func excludeFromBackup(_ url: URL) async throws {
+        operations.append(.excludeFromBackup(url))
+        if failure == .backup {
+            throw Failure.backup
+        }
+    }
+
+    func recordedOperations() -> [Operation] {
+        operations
     }
 }

@@ -25,13 +25,70 @@ enum ProtectedLocalUserProfileStoreError:
     case deleteFailed
 }
 
+protocol LocalProfileFileProtecting: Sendable {
+    func protectDirectory(at url: URL) async throws
+    func protectFile(at url: URL) async throws
+    func excludeFromBackup(_ url: URL) async throws
+}
+
+struct AppleLocalProfileFileProtector: LocalProfileFileProtecting {
+    func protectDirectory(at url: URL) async throws {
+        try applyAndVerifyCompleteProtection(to: url)
+    }
+
+    func protectFile(at url: URL) async throws {
+        try applyAndVerifyCompleteProtection(to: url)
+    }
+
+    func excludeFromBackup(_ url: URL) async throws {
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        var mutableURL = url
+        try mutableURL.setResourceValues(values)
+
+        let storedValues = try mutableURL.resourceValues(
+            forKeys: [.isExcludedFromBackupKey]
+        )
+        guard storedValues.isExcludedFromBackup == true else {
+            throw VerificationError.failed
+        }
+    }
+
+    private func applyAndVerifyCompleteProtection(to url: URL) throws {
+        try (url as NSURL).setResourceValue(
+            URLFileProtection.complete,
+            forKey: .fileProtectionKey
+        )
+        let values = try url.resourceValues(
+            forKeys: [.fileProtectionKey]
+        )
+        guard values.fileProtection == .complete else {
+            throw VerificationError.failed
+        }
+    }
+
+    private enum VerificationError: Error {
+        case failed
+    }
+}
+
 actor ProtectedFileLocalUserProfileStore: LocalUserProfileStore {
     static let fileName = "current-user-profile.json"
 
     private let baseDirectory: URL
+    let fileProtector: any LocalProfileFileProtecting
 
     init(baseDirectory: URL) {
         self.baseDirectory = baseDirectory
+        fileProtector = AppleLocalProfileFileProtector()
+    }
+
+    init(
+        baseDirectory: URL,
+        fileProtector: any LocalProfileFileProtecting
+    ) {
+        self.baseDirectory = baseDirectory
+        self.fileProtector = fileProtector
     }
 
     func loadCurrentProfile() async throws -> LocalUserProfileBundle? {
@@ -75,7 +132,7 @@ actor ProtectedFileLocalUserProfileStore: LocalUserProfileStore {
             throw ProtectedLocalUserProfileStoreError.encodingFailed
         }
 
-        try prepareProtectedDirectory()
+        try await prepareProtectedDirectory()
         do {
             try data.write(
                 to: fileURL,
@@ -86,13 +143,13 @@ actor ProtectedFileLocalUserProfileStore: LocalUserProfileStore {
         }
 
         do {
-            try applyAndVerifyCompleteProtection(to: fileURL)
+            try await fileProtector.protectFile(at: fileURL)
         } catch {
             try? FileManager.default.removeItem(at: fileURL)
             throw ProtectedLocalUserProfileStoreError.protectionFailed
         }
         do {
-            try excludeAndVerifyBackup(for: fileURL)
+            try await fileProtector.excludeFromBackup(fileURL)
         } catch {
             try? FileManager.default.removeItem(at: fileURL)
             throw ProtectedLocalUserProfileStoreError
@@ -132,7 +189,7 @@ actor ProtectedFileLocalUserProfileStore: LocalUserProfileStore {
         }
     }
 
-    private func prepareProtectedDirectory() throws {
+    private func prepareProtectedDirectory() async throws {
         let manager = FileManager.default
         do {
             try manager.createDirectory(
@@ -144,38 +201,10 @@ actor ProtectedFileLocalUserProfileStore: LocalUserProfileStore {
                 .directoryCreationFailed
         }
         do {
-            try applyAndVerifyCompleteProtection(to: baseDirectory)
+            try await fileProtector.protectDirectory(at: baseDirectory)
         } catch {
             throw ProtectedLocalUserProfileStoreError
                 .directoryProtectionFailed
-        }
-    }
-
-    private func applyAndVerifyCompleteProtection(to url: URL) throws {
-        try (url as NSURL).setResourceValue(
-            URLFileProtection.complete,
-            forKey: .fileProtectionKey
-        )
-        let values = try url.resourceValues(
-            forKeys: [.fileProtectionKey]
-        )
-        guard values.fileProtection == .complete else {
-            throw ProtectedLocalUserProfileStoreError.protectionFailed
-        }
-    }
-
-    private func excludeAndVerifyBackup(for url: URL) throws {
-        var values = URLResourceValues()
-        values.isExcludedFromBackup = true
-        var mutableURL = url
-        try mutableURL.setResourceValues(values)
-
-        let storedValues = try mutableURL.resourceValues(
-            forKeys: [.isExcludedFromBackupKey]
-        )
-        guard storedValues.isExcludedFromBackup == true else {
-            throw ProtectedLocalUserProfileStoreError
-                .backupExclusionFailed
         }
     }
 
