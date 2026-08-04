@@ -17,6 +17,15 @@ public protocol UserHealthProfileRepository: Sendable {
     func delete(id: UUID) async throws
 }
 
+/// Single-user persistence boundary for the local profile bundle.
+public protocol LocalUserProfileStore: Sendable {
+    func loadCurrentProfile() async throws -> LocalUserProfileBundle?
+    func saveCurrentProfile(
+        _ profile: LocalUserProfileBundle
+    ) async throws
+    func deleteCurrentProfile() async throws
+}
+
 /// Read/write boundary for medication history.
 public protocol MedicationHistoryRepository: Sendable {
     func fetch(id: UUID) async throws -> MedicationRecord?
