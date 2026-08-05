@@ -5,7 +5,7 @@
 - Fixed baseline SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894`
 - Branch: `feature/zhipu-online-medicine-mainline`
 - Start time: `2026-08-05 23:55:56 CST (+0800)`
-- Current phase: `Phase 2C - Server medicine recognition API`
+- Current phase: `Phase 3 - iOS remote adapter`
 - Overall status: `IN_PROGRESS`
 - Initial `origin/develop` SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894` (verified against remote with `git ls-remote`)
 - Final `origin/develop` SHA: `PENDING`
@@ -20,8 +20,8 @@
 | 0 - Preflight | PASSED_WITH_LIMITATION | `775de0f2ec82ee1e1779f94c021011639ae29593` | `23032be22ef00ca8ffa0e4721bbfe5396f6d8040` | `checkpoint/zhipu-night-0-preflight` | Branch/baseline/remote/architecture/CI/assets audit passed; archive gates passed |
 | 2A - Structured package evidence | PASSED | `cdf1c11ea450328144c4515c8ea5f403e2eb6200` | `1a33db77b7682290fc698de4263a26e7b561cf2c` | `checkpoint/zhipu-night-2a-evidence` | Full Server suite: 171 passed, 1 live smoke skipped, 0 failed |
 | 2B - Controlled retrieval and verification | PASSED | `e35eaa58116500cc212ba9797f61e6720fe8ae82` | `9a0d2d0bb9770aa373c6ffe1b1e5eeb40880f80a` | `checkpoint/zhipu-night-2b-resolution` | Focused 22/22 and full Server 193 passed; 1 live smoke skipped; 0 failed |
-| 2C - Server recognition API | PASSED | PENDING | PENDING | PENDING | Core 365/365 and Server 209/209 passed; 1 live smoke skipped |
-| 3 - iOS remote adapter | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
+| 2C - Server recognition API | PASSED | `758b6bdc8027d16b19b6baa52390de8377774ad9` | PENDING | `checkpoint/zhipu-night-2c-server-api` | Core 365/365 and Server 209/209 passed; 1 live smoke skipped |
+| 3 - iOS remote adapter | IN_PROGRESS | PENDING | PENDING | PENDING | Read-only implementation audit passed; code/tests not started |
 | 4 - Remote-first composition | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 | 5 - Full regression and smoke | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 
@@ -217,6 +217,8 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Resolved review finding: the shared request DTO strictly rejects unknown top-level and capability fields, including health/profile fields; the duplicate Server-side wire contract was removed.
 - API `requestID` semantics: correlation-only with no idempotency cache; repeated IDs are reprocessed and this is documented and tested.
 - Package manifest changes: `NONE`
+- Implementation commit: `758b6bdc8027d16b19b6baa52390de8377774ad9` (pushed)
+- Annotated checkpoint: `checkpoint/zhipu-night-2c-server-api` (pushed and verified to dereference to the implementation commit)
 
 ## Known Issues
 
@@ -233,7 +235,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 
 ## Next Action
 
-- Complete the Phase 2C diff/prohibited-scope/secret gates, create and push the phase commit and annotated checkpoint, then archive its SHA in a state-only commit before beginning the iOS remote adapter.
+- Add the dedicated health-free online recognition client boundary, strict response mapper, bounded iOS image preparation, and URLSession adapter with mocked transport tests; do not modify composition, RiskEngine, or Presentation until Phase 4.
 
 ## Safety Record
 
