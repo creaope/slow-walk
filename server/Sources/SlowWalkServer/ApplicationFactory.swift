@@ -1,4 +1,5 @@
 import Hummingbird
+import Logging
 import SlowWalkAPIContracts
 import SlowWalkDataInterfaces
 import SlowWalkLocationRisk
@@ -60,7 +61,8 @@ func makeSlowWalkApplication(
     medicinePackageEvidenceExtractor:
         any MedicinePackageEvidenceExtracting,
     medicineRecognitionTimeout:
-        Duration = RemoteMedicineRecognitionService.defaultTimeout
+        Duration = RemoteMedicineRecognitionService.defaultTimeout,
+    logger: Logger? = nil
 ) throws -> some ApplicationProtocol {
     // Validate the bundled catalog at composition time. A missing or unsafe
     // resource prevents startup instead of silently serving an empty catalog.
@@ -95,7 +97,9 @@ func makeSlowWalkApplication(
     }
 
     let router = Router(context: SlowWalkRequestContext.self)
-    router.middlewares.add(LogRequestsMiddleware(.info))
+    router.middlewares.add(
+        PathOnlyRequestLoggingMiddleware<SlowWalkRequestContext>(.info)
+    )
 
     router.get("/health") { _, _ in
         HealthResponseDTO()
@@ -202,7 +206,8 @@ func makeSlowWalkApplication(
         configuration: .init(
             address: .hostname(configuration.host, port: configuration.port),
             serverName: configuration.serverName
-        )
+        ),
+        logger: logger
     )
 }
 

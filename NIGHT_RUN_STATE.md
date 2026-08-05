@@ -22,8 +22,8 @@
 | 2B - Controlled retrieval and verification | PASSED | `e35eaa58116500cc212ba9797f61e6720fe8ae82` | `9a0d2d0bb9770aa373c6ffe1b1e5eeb40880f80a` | `checkpoint/zhipu-night-2b-resolution` | Focused 22/22 and full Server 193 passed; 1 live smoke skipped; 0 failed |
 | 2C - Server recognition API | PASSED | `758b6bdc8027d16b19b6baa52390de8377774ad9` | `90123f98d4e6877147b396e9c2e4c6e078a5fe61` | `checkpoint/zhipu-night-2c-server-api` | Core 365/365 and Server 209/209 passed; 1 live smoke skipped |
 | 3 - iOS remote adapter | PASSED | `27342c40dee61da1d77603e4d48b60ff05886b1b` | `817f11f34ff151f6f40a6cf17fe00830c7b137af` | `checkpoint/zhipu-night-3-ios-client` | Core 392/392, Server 211/211, and iOS Simulator 29/29 passed; 1 credential-gated live test skipped |
-| 4 - Remote-first composition | PASSED_WITH_LIMITATION | `50b469c5fde1badca493befb11fa52f939a5ab2e` | PENDING | `checkpoint/zhipu-night-4-composition` | Core 414/414, Presentation 74/74, Server 211/211, and final iOS composition 89/89 passed; P0=0, P1=0, P2=2 |
-| 5 - Full regression and smoke | IN_PROGRESS | PENDING | PENDING | PENDING | CI-equivalent regression pending |
+| 4 - Remote-first composition | PASSED_WITH_LIMITATION | `50b469c5fde1badca493befb11fa52f939a5ab2e` | `4776fdf5775b29db41dd2bbf9403f090aa5be481` | `checkpoint/zhipu-night-4-composition` | Core 414/414, Presentation 74/74, Server 211/211, and final iOS composition 89/89 passed; P0=0, P1=0, P2=2 |
+| 5 - Full regression and smoke | IN_PROGRESS | PENDING | PENDING | PENDING | Core 414/414, Presentation 74/74, Server 212/212, and iOS Simulator 387/387 passed; final independent review pending |
 
 ## Preflight Findings And Plan
 
@@ -139,10 +139,10 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Phase 0 `git diff --check`: `PASSED`
 - Phase 0 changed-file/stat review: `PASSED` (`NIGHT_RUN_STATE.md`, 167 lines before gate-result update)
 - Phase 0 prohibited-file review: `PASSED` (no prohibited file modified)
-- Phase 5 phase-specific tests: `NOT_RUN`
-- Phase 5 `git diff --check`: `NOT_RUN`
-- Phase 5 full regression: `NOT_RUN`
-- Phase 5 iOS Simulator tests: `NOT_RUN`
+- Phase 5 phase-specific tests: `PASSED` (Core 414/414, Presentation 74/74, Server 212/212; 0 failures)
+- Phase 5 `git diff --check`: `PASSED`
+- Phase 5 full regression: `PASSED` (all required SwiftPM and iOS suites passed)
+- Phase 5 iOS Simulator tests: `PASSED` (387/387 across 26 suites; workflow-selected iPhone Air, iOS 26.5; `** TEST SUCCEEDED **`)
 - Real Zhipu smoke: `SKIPPED` (no supported API key environment variable present)
 - Phase 2A focused evidence parsing tests: `PASSED` (15/15)
 - Phase 2A Zhipu client regressions: `PASSED` (33/33)
@@ -193,6 +193,52 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Phase 4 project-setting review: `PASSED` (`project.pbxproj` changes are limited to Debug/Release camera and photo-library usage descriptions; no signing, team, entitlement, or bundle identifier change)
 - Phase 4 secret/log review: `PASSED` (no production logging calls or credential value; the only broad-pattern hit is the explicit fake `Bearer not-a-real-token` negative test fixture)
 - Phase 4 canonical-implementation review: `PASSED` (one existing MedicineResolver, MedicinePipeline, MedicationRiskEngine, and ActionCardFactory implementation remains)
+- Phase 5 iOS CI command audit: `PASSED` (read from `.github/workflows/ios-app.yml`; `SlowWalkApp` scheme, dynamically selected available iPhone Simulator, signing disabled)
+- Phase 5 full Core suite: `PASSED` (414 executed, 0 failures; repeated after request-log remediation)
+- Phase 5 full Presentation suite: `PASSED` (74 executed, 0 failures; repeated after request-log remediation)
+- Phase 5 full Server suite: `PASSED` (212 executed, 0 failures; 1 live network test skipped by explicit opt-in gate after request-log remediation)
+- Phase 5 workflow-equivalent iOS suite: `PASSED` (387 executed, 0 failures on dynamically selected iPhone Air, iOS 26.5)
+- Phase 5 post-remediation iOS applicability audit: `PASSED` (the remediation changes Server-only source/tests and run state; no iOS/Core/Presentation source changed after the 387/387 Simulator gate)
+- Phase 5 fixed demo asset audit: `PASSED` (`acetaminophen-clean-v1.png`, 922218 bytes, SHA-256 `ca50f3f9e570df70b6ac7109076f2075e141279025349a39bdd233858a47164f`, unchanged from baseline)
+- Phase 5 real Zhipu smoke decision: `SKIPPED` (`RUN_ZHIPU_LIVE_SMOKE`, `ZHIPU_API_KEY`, and `BIGMODEL_API_KEY` are absent; no real request was attempted)
+- Phase 5 cumulative changed-file/stat review: `PASSED` (55 files; committed snapshot before final state records was `+12591/-137`)
+- Phase 5 prohibited-file review: `PASSED` (no CI, Package manifest, entitlement, Onboarding, Profile, risk-rule, or ActionCard file modified)
+- Phase 5 canonical-implementation review: `PASSED` (one MedicineResolver, MedicinePipeline, MedicationRiskEngine, and ActionCardFactory implementation remains)
+- Phase 5 recognition logging review: `PASSED` after remediation (global request logs now record path and method only; recognition logs contain request ID, stable recognition/error code, and HTTP status only; no query, image, response body, API key, Authorization, or health value)
+- Phase 5 secret-pattern review: `PASSED` (no credential value; two broad-pattern hits are explicit negative-test markers: `Bearer not-a-real-token` and `provider-body-secret Bearer api-key-secret`)
+- Phase 5 remote checkpoint audit: `PASSED` (all Phase 0/2A/2B/2C/3/4 annotated tags exist remotely and dereference to their recorded implementation commits)
+- Phase 5 interim develop check: `PASSED` (`origin/develop` remains `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894`)
+- Phase 5 request-log P1 remediation attempt 1: `FAILED` at compile time because the new middleware/factory/test did not explicitly import the existing transitive `Logging` module; no test or production request ran. The next targeted repair adds explicit imports and Context specialization without changing the design.
+- Phase 5 request-log P1 remediation attempt 2: `PASSED` (application-level captured-log regression 1/1; fixed path and method retained, query image/health keys and markers absent from every log entry)
+- Phase 5 request-log enhanced regression: `PASSED` (1/1 after adding an Authorization marker; query image/health markers and authorization header value are absent from all captured logs)
+- Phase 5 resolved review finding: the prior global logger rendered complete URIs; it is replaced by a path-only middleware and the full Server suite passed 212/212. Current review count returns to `P1=0` pending independent confirmation.
+- Phase 5 independent request-log review: `PASSED` (`P0=0`, `P1=0`; targeted 1/1 and Server 212/212 independently repeated). The identified test-only body Base64 canary gap was closed and targeted 1/1 plus full Server 212/212 passed again.
+- Phase 5 final staged `git diff --check`: `PASSED` (all tracked and newly added Phase 5 files)
+- Phase 5 final changed-file/stat review: `PASSED` (4 files; staged snapshot before these gate-result lines was `+227/-15`)
+- Phase 5 final cumulative stat review: `PASSED` (56 files from fixed baseline; snapshot before these gate-result lines was `+12805/-139`)
+- Phase 5 final prohibited/security/architecture review: `PASSED` (`P0=0`, `P1=0`; no prohibited path, credential, complete-URI log, or duplicate canonical/pipeline/risk/ActionCard implementation)
+
+### Phase 5 Final Validation
+
+- Online success recognition: `PASSED_WITH_LIMITATION` (Fake Provider Server integration resolves through the canonical resolver; iOS composition calls remote once, local zero times, and reports `remote`; real Provider smoke was not credential-enabled).
+- Recoverable online failure enters local fallback: `PASSED` (offline, timeout, 429, Server unavailable, and Provider unavailable are whitelisted; result provenance is `localFallback`).
+- Ambiguous/no-candidate/conflicting result is not silently covered by local recognition: `PASSED` (semantic outcomes call local zero times and remain confirmation/unresolved states).
+- Cancellation prevents late-result publication: `PASSED` (generation and cancellation barriers reject predecessor results after replacement).
+- Rapid duplicate submission is suppressed: `PASSED` (the full Simulator suite includes the rapid-shutter one-capture/one-recognition regression).
+- Image, Authorization, Provider body, and health markers are absent from recognition logs: `PASSED` (path-only global logging plus application-level query/header/body canaries; strict DTO rejects health/profile fields).
+- Recognition continues through the existing MedicinePipeline: `PASSED` (the router returns the existing `MedicineRecognitionInput`; `LocalMedicineAssessmentRequester` remains the single pipeline adapter).
+- RiskEngine remains singular and unchanged: `PASSED` (one `MedicationRiskEngine` implementation; no risk-rule file changed).
+- Presentation mapping remains singular: `PASSED` (one `MedicineStateMapper`; only non-medical source/degradation notice added, no ActionCard semantic mapping added).
+- Onboarding and Profile remain unmodified: `PASSED` (baseline-to-current changed-path audit has no matching file).
+- Final independent review: `P0=0`, `P1=0`, `P2=9` (three permitted operational/data/deployment limitations and six non-blocking technical limitations listed below).
+
+### Phase 5 Implementation
+
+- Added: `server/Sources/SlowWalkServer/PathOnlyRequestLoggingMiddleware.swift`.
+- Modified: `server/Sources/SlowWalkServer/ApplicationFactory.swift` to install path-only request logging and accept an internal test logger.
+- Modified: `server/Tests/SlowWalkServerTests/MedicineRecognition/RemoteMedicineRecognitionServerTests.swift` with application-level query/header/body log canaries.
+- Business/test diff excluding the run-state file before final state additions: `+175/-5`.
+- Package manifest, dependency, route, DTO, medical rule, canonical resolver, pipeline, RiskEngine, ActionCard, CI, signing, entitlement, bundle identifier, Onboarding, and Profile changes: `NONE`.
 
 ## Phase Change Records
 
@@ -332,9 +378,9 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 
 ## Known Issues
 
-- Real provider behavior cannot be verified in this run because no API key is available; Fake Client coverage remains required.
-- The controlled demo catalog has no trusted manufacturer or approval identifiers; production matching for those fields remains unavailable until controlled metadata is supplied.
-- The repository intentionally contains no production iOS Server base URL value. The validated environment/Info dictionary configuration mechanism is implemented, but real iOS online smoke remains unavailable until deployment injects a URL.
+- P2 (operational): real Provider behavior cannot be verified because no API key is available; Fake Client coverage passed and the real smoke is `SKIPPED`.
+- P2 (data): the controlled demo catalog has no trusted manufacturer or approval identifiers; production matching for those fields remains unavailable until controlled metadata is supplied.
+- P2 (deployment): the repository intentionally contains no production iOS Server base URL value. The validated environment/Info dictionary configuration mechanism is implemented, but real iOS online smoke remains unavailable until deployment injects a URL.
 - P2: the Server validates declared MIME and size but does not inspect image magic bytes; bytes are only forwarded through the bounded Provider request and never executed or decoded on the Server.
 - P2: 2C has no explicit RiskEngine zero-call spy; its recognition controller/service dependency graph contains no RiskEngine or assessment dependency, and strict request decoding rejects health fields.
 - P2: a deliberately cancellation-ignoring extractor task can remain alive briefly after the API timeout; the API returns without waiting, late output cannot be published, and the production URLSession transport cooperates with cancellation.
@@ -348,7 +394,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 
 ## Next Action
 
-- Create and push the Phase 4 state-only archive commit, then run the Phase 5 repository-wide CI-equivalent regression and credential-gated smoke decision.
+- Create and push the Phase 5 implementation commit and annotated final checkpoint, then complete the final develop/state/cleanliness record in a state-only archive commit.
 
 ## Safety Record
 

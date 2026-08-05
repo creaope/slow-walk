@@ -1,6 +1,7 @@
 import Foundation
 import Hummingbird
 import HummingbirdTesting
+import Logging
 import SlowWalkAPIContracts
 import SlowWalkDataInterfaces
 import SlowWalkDomain
@@ -74,6 +75,78 @@ final class RemoteMedicineRecognitionServerTests:
                 )
             }
         }
+    }
+
+    func testRequestLoggingDropsQueryImageAndHealthMarkers() async throws {
+        let imageMarker = "private-image-query-marker"
+        let bodyMarker = "private-image-body-marker"
+        let healthMarker = "private-health-query-marker"
+        let authorizationMarker = "private-authorization-marker"
+        let logStore = CapturedLogStore()
+        let logger = Logger(label: "safe-request-logging-test") { _ in
+            CapturingLogHandler(store: logStore)
+        }
+        let extractor = FakeMedicinePackageEvidenceExtractor(
+            result: .success(
+                try evidence(
+                    visibleTexts: ["Acetaminophen"],
+                    probableGenericNames: ["Acetaminophen"]
+                )
+            )
+        )
+        let application = try makeApplication(
+            extractor: extractor,
+            logger: logger
+        )
+        let path = SlowWalkAPI.Endpoint.medicineRecognize.path
+        let uri =
+            "\(path)?imageBase64=\(imageMarker)"
+            + "&healthContext=\(healthMarker)"
+
+        try await application.test(.router) { client in
+            try await client.execute(
+                uri: uri,
+                method: .post,
+                headers: [
+                    .contentType: "application/json",
+                    .authorization: "Bearer \(authorizationMarker)",
+                ],
+                body: try self.requestBody(
+                    imageData: Data(bodyMarker.utf8)
+                )
+            ) { response in
+                XCTAssertEqual(response.status, .ok)
+            }
+        }
+
+        let requestLogs = logStore.entries.filter {
+            $0.message == "Request"
+        }
+        let requestLog = try XCTUnwrap(requestLogs.first)
+        XCTAssertEqual(requestLogs.count, 1)
+        XCTAssertEqual(
+            requestLog.metadata["hb.request.path"]?.description,
+            path
+        )
+        XCTAssertEqual(
+            requestLog.metadata["hb.request.method"]?.description,
+            "POST"
+        )
+
+        let renderedLogs = logStore.rendered
+        XCTAssertFalse(renderedLogs.contains(imageMarker))
+        XCTAssertFalse(renderedLogs.contains(bodyMarker))
+        XCTAssertFalse(
+            renderedLogs.contains(
+                Data(bodyMarker.utf8).base64EncodedString()
+            )
+        )
+        XCTAssertFalse(renderedLogs.contains(healthMarker))
+        XCTAssertFalse(renderedLogs.contains(authorizationMarker))
+        XCTAssertFalse(renderedLogs.contains("imageBase64="))
+        XCTAssertFalse(renderedLogs.contains("\"imageBase64\":"))
+        XCTAssertFalse(renderedLogs.contains("healthContext="))
+        XCTAssertFalse(renderedLogs.contains("Authorization"))
     }
 
     func testBoundedSupportingEvidencePreservesCorroborationWitnesses() {
@@ -623,7 +696,8 @@ final class RemoteMedicineRecognitionServerTests:
     }
 
     private func makeApplication(
-        extractor: any MedicinePackageEvidenceExtracting
+        extractor: any MedicinePackageEvidenceExtracting,
+        logger: Logger? = nil
     ) throws -> some ApplicationProtocol {
         try makeSlowWalkApplication(
             configuration: .init(port: 0),
@@ -632,7 +706,8 @@ final class RemoteMedicineRecognitionServerTests:
                 fixedUUID: fallbackRequestID
             ),
             medicinePackageEvidenceExtractor: extractor,
-            medicineRecognitionTimeout: .seconds(2)
+            medicineRecognitionTimeout: .seconds(2),
+            logger: logger
         )
     }
 
@@ -730,6 +805,68 @@ final class RemoteMedicineRecognitionServerTests:
             APIErrorDTO.self,
             from: Data(body.readableBytesView)
         )
+    }
+}
+
+private final class CapturedLogStore: @unchecked Sendable {
+    struct Entry: Sendable {
+        let message: String
+        let metadata: Logger.Metadata
+    }
+
+    private let lock = NSLock()
+    private var storedEntries: [Entry] = []
+
+    var entries: [Entry] {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedEntries
+    }
+
+    var rendered: String {
+        entries.map { entry in
+            let metadata = entry.metadata
+                .sorted { $0.key < $1.key }
+                .map { "\($0.key)=\($0.value)" }
+                .joined(separator: " ")
+            return "\(entry.message) \(metadata)"
+        }
+        .joined(separator: "\n")
+    }
+
+    func append(message: String, metadata: Logger.Metadata) {
+        lock.lock()
+        storedEntries.append(
+            Entry(message: message, metadata: metadata)
+        )
+        lock.unlock()
+    }
+}
+
+private struct CapturingLogHandler: LogHandler {
+    var metadata: Logger.Metadata = [:]
+    var metadataProvider: Logger.MetadataProvider?
+    var logLevel: Logger.Level = .trace
+
+    let store: CapturedLogStore
+
+    func log(event: LogEvent) {
+        var mergedMetadata = metadata
+        if let provided = metadataProvider?.get() {
+            mergedMetadata.merge(provided) { _, new in new }
+        }
+        if let eventMetadata = event.metadata {
+            mergedMetadata.merge(eventMetadata) { _, new in new }
+        }
+        store.append(
+            message: event.message.description,
+            metadata: mergedMetadata
+        )
+    }
+
+    subscript(metadataKey key: String) -> Logger.Metadata.Value? {
+        get { metadata[key] }
+        set { metadata[key] = newValue }
     }
 }
 
