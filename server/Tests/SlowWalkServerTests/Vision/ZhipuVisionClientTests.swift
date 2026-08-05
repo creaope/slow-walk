@@ -199,7 +199,11 @@ final class ZhipuVisionClientTests: XCTestCase, @unchecked Sendable {
         let gate = TwoPhaseCancellationGate()
         let registered = expectation(description: "entry waiter registered")
         let original = Task {
-            try await gate.waitUntilEntered(onWaiterRegistered: registered.fulfill)
+            try await gate.waitUntilEntered(
+                onWaiterRegistered: {
+                    registered.fulfill()
+                }
+            )
         }
         await fulfillment(of: [registered], timeout: 1)
         let originalCounts = await gate.entryRegistrationCounts()
@@ -232,7 +236,9 @@ final class ZhipuVisionClientTests: XCTestCase, @unchecked Sendable {
         let registered = expectation(description: "release waiter registered")
         let original = Task {
             try await gate.arriveAndWaitForRelease(
-                onWaiterRegistered: registered.fulfill
+                onWaiterRegistered: {
+                    registered.fulfill()
+                }
             )
         }
         await fulfillment(of: [registered], timeout: 1)
