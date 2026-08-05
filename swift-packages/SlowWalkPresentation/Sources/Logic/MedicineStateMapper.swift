@@ -115,6 +115,10 @@ public enum MedicineStateMapper {
                     resolvedMedicineName: presentation.response.resolution
                         .selectedMedicine?.canonicalName
                 ),
+                recognitionNotice: MedicinePresentationCopy
+                    .recognitionNotice(
+                        for: presentation.recognitionContext
+                    ),
                 requiresMedicineConfirmation: false,
                 demoDisclaimer: demoDisclaimer
             )
@@ -131,6 +135,10 @@ public enum MedicineStateMapper {
             resolvedMedicineName: requirement.response?.resolution
                 .selectedMedicine?.canonicalName
         )
+        let recognitionNotice = MedicinePresentationCopy
+            .recognitionNotice(
+                for: requirement.recognitionContext
+            )
 
         switch requirement.reason {
         case .noRecognizedText,
@@ -144,6 +152,7 @@ public enum MedicineStateMapper {
                 actionCard: card,
                 failure: nil,
                 recognition: recognition,
+                recognitionNotice: recognitionNotice,
                 requiresMedicineConfirmation: true,
                 demoDisclaimer: demoDisclaimer
             )
@@ -159,6 +168,7 @@ public enum MedicineStateMapper {
                     actionCard: nil,
                     failure: nil,
                     recognition: recognition,
+                    recognitionNotice: recognitionNotice,
                     requiresMedicineConfirmation: true,
                     demoDisclaimer: demoDisclaimer
                 )
@@ -171,6 +181,7 @@ public enum MedicineStateMapper {
                 actionCard: response.actionCard,
                 failure: nil,
                 recognition: recognition,
+                recognitionNotice: recognitionNotice,
                 requiresMedicineConfirmation: true,
                 demoDisclaimer: demoDisclaimer
             )

@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// Read-only care settings for the current demo build.
+/// Care settings for the current demo build.
 struct CareSettingsView: View {
     @Environment(AppEnvironment.self) private var environment
 
@@ -13,6 +13,9 @@ struct CareSettingsView: View {
     }
 
     var body: some View {
+        @Bindable var recognitionPreferences =
+            environment.medicineRecognitionPreferences
+
         Form {
             Section {
                 DemoDataBanner()
@@ -59,6 +62,32 @@ struct CareSettingsView: View {
             } footer: {
                 Text("这些选项由 iPhone 的辅助功能设置统一控制。")
                     .fixedSize(horizontal: false, vertical: true)
+            }
+
+            Section {
+                Toggle(
+                    isOn: $recognitionPreferences.onDeviceOnly
+                ) {
+                    Label(
+                        "仅在设备上识别",
+                        systemImage: "iphone.and.arrow.forward"
+                    )
+                }
+                .slowWalkReadableContent()
+            } header: {
+                Text("药品识别与隐私")
+            } footer: {
+                Text(
+                    MedicineRecognitionPrivacyCopy.description(
+                        onDeviceOnly:
+                            recognitionPreferences.onDeviceOnly,
+                        onlineRecognitionConfigured:
+                            environment
+                                .medicineRecognitionServerConfiguration
+                                .baseURL != nil
+                    )
+                )
+                .fixedSize(horizontal: false, vertical: true)
             }
 
             Section {
@@ -119,6 +148,22 @@ struct CareSettingsView: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(status.summaryLine)
         .slowWalkReadableContent()
+    }
+}
+
+enum MedicineRecognitionPrivacyCopy {
+    static func description(
+        onDeviceOnly: Bool,
+        onlineRecognitionConfigured: Bool
+    ) -> String {
+        if onDeviceOnly {
+            return "药品包装图片只在这台设备上处理。"
+        }
+        if onlineRecognitionConfigured {
+            return "药品包装图片会优先发送到已配置的识别服务；"
+                + "服务不可用时改在设备上处理。"
+        }
+        return "当前未配置在线识别服务，药品包装图片只在设备上处理。"
     }
 }
 

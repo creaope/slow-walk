@@ -27,6 +27,7 @@ public struct MedicineAssessmentView: View {
         Form {
             demoDisclaimerSection
             content
+            recognitionNoticeSection
             recognitionSection
         }
     }
@@ -42,7 +43,25 @@ public struct MedicineAssessmentView: View {
         }
     }
 
-    // MARK: - Recognition
+    // MARK: - Recognition notice
+
+    @ViewBuilder
+    private var recognitionNoticeSection: some View {
+        if let notice = state.recognitionNotice {
+            Section {
+                Label {
+                    Text(notice)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "info.circle")
+                        .accessibilityHidden(true)
+                }
+                .accessibilityElement(children: .combine)
+            }
+        }
+    }
+
+    // MARK: - Recognition evidence
 
     @ViewBuilder
     private var recognitionSection: some View {

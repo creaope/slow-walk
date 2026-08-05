@@ -473,9 +473,9 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "用于拍摄药品包装，在您的设备上离线识别文字，帮助核对药品信息。";
+				INFOPLIST_KEY_NSCameraUsageDescription = "用于拍摄药品包装并识别文字。允许在线识别时，包装照片会发送到您配置的识别服务；可在设置中选择仅在设备上处理。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于在步行外出时提供路线与驻留安全提醒，位置数据仅在您的设备上使用。";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于从相册选择药品包装照片，在您的设备上离线识别文字。";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于从相册选择药品包装照片并识别文字。允许在线识别时，所选照片会发送到您配置的识别服务；可在设置中选择仅在设备上处理。";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
@@ -518,9 +518,9 @@
 				DEVELOPMENT_TEAM = "";
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
-				INFOPLIST_KEY_NSCameraUsageDescription = "用于拍摄药品包装，在您的设备上离线识别文字，帮助核对药品信息。";
+				INFOPLIST_KEY_NSCameraUsageDescription = "用于拍摄药品包装并识别文字。允许在线识别时，包装照片会发送到您配置的识别服务；可在设置中选择仅在设备上处理。";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "用于在步行外出时提供路线与驻留安全提醒，位置数据仅在您的设备上使用。";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于从相册选择药品包装照片，在您的设备上离线识别文字。";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "用于从相册选择药品包装照片并识别文字。允许在线识别时，所选照片会发送到您配置的识别服务；可在设置中选择仅在设备上处理。";
 				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;

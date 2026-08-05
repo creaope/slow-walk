@@ -157,6 +157,69 @@ public enum ClientFailureMapper {
             }
         }
 
+        if let recognitionError =
+            error as? OnlineMedicineRecognitionFailure
+        {
+            switch recognitionError {
+            case .offline, .serverUnavailable:
+                return ClientFailure(
+                    kind: .transportUnavailable,
+                    apiErrorCode: nil,
+                    requestID: nil,
+                    endpoint: .medicineRecognize,
+                    isRecoverable: true
+                )
+            case .timeout:
+                return ClientFailure(
+                    kind: .timeout,
+                    apiErrorCode: nil,
+                    requestID: nil,
+                    endpoint: .medicineRecognize,
+                    isRecoverable: true
+                )
+            case .rateLimited:
+                return ClientFailure(
+                    kind: .api,
+                    apiErrorCode: .providerRateLimited,
+                    requestID: nil,
+                    endpoint: .medicineRecognize,
+                    isRecoverable: true
+                )
+            case .providerUnavailable:
+                return ClientFailure(
+                    kind: .api,
+                    apiErrorCode: .providerUnavailable,
+                    requestID: nil,
+                    endpoint: .medicineRecognize,
+                    isRecoverable: true
+                )
+            case .invalidImage, .unreadable, .noCandidate, .ambiguous:
+                return ClientFailure(
+                    kind: .recognition,
+                    apiErrorCode: nil,
+                    requestID: nil,
+                    endpoint: .medicineRecognize,
+                    isRecoverable: false
+                )
+            case .imageTooLarge:
+                return ClientFailure(
+                    kind: .api,
+                    apiErrorCode: .imageTooLarge,
+                    requestID: nil,
+                    endpoint: .medicineRecognize,
+                    isRecoverable: false
+                )
+            case .invalidResponse:
+                return ClientFailure(
+                    kind: .malformedResponse,
+                    apiErrorCode: nil,
+                    requestID: nil,
+                    endpoint: .medicineRecognize,
+                    isRecoverable: false
+                )
+            }
+        }
+
         if error is OCRRecognitionError {
             return ClientFailure(
                 kind: .recognition,

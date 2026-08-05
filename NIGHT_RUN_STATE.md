@@ -21,8 +21,8 @@
 | 2A - Structured package evidence | PASSED | `cdf1c11ea450328144c4515c8ea5f403e2eb6200` | `1a33db77b7682290fc698de4263a26e7b561cf2c` | `checkpoint/zhipu-night-2a-evidence` | Full Server suite: 171 passed, 1 live smoke skipped, 0 failed |
 | 2B - Controlled retrieval and verification | PASSED | `e35eaa58116500cc212ba9797f61e6720fe8ae82` | `9a0d2d0bb9770aa373c6ffe1b1e5eeb40880f80a` | `checkpoint/zhipu-night-2b-resolution` | Focused 22/22 and full Server 193 passed; 1 live smoke skipped; 0 failed |
 | 2C - Server recognition API | PASSED | `758b6bdc8027d16b19b6baa52390de8377774ad9` | `90123f98d4e6877147b396e9c2e4c6e078a5fe61` | `checkpoint/zhipu-night-2c-server-api` | Core 365/365 and Server 209/209 passed; 1 live smoke skipped |
-| 3 - iOS remote adapter | PASSED | `27342c40dee61da1d77603e4d48b60ff05886b1b` | PENDING | `checkpoint/zhipu-night-3-ios-client` | Core 392/392, Server 211/211, and iOS Simulator 29/29 passed; 1 credential-gated live test skipped |
-| 4 - Remote-first composition | IN_PROGRESS | PENDING | PENDING | PENDING | Read-only composition audit passed; implementation not started |
+| 3 - iOS remote adapter | PASSED | `27342c40dee61da1d77603e4d48b60ff05886b1b` | `817f11f34ff151f6f40a6cf17fe00830c7b137af` | `checkpoint/zhipu-night-3-ios-client` | Core 392/392, Server 211/211, and iOS Simulator 29/29 passed; 1 credential-gated live test skipped |
+| 4 - Remote-first composition | IN_PROGRESS | PENDING | PENDING | PENDING | Core 414/414, Presentation 74/74, Server 211/211, and final iOS composition 89/89 passed; final archive audit pending |
 | 5 - Full regression and smoke | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 
 ## Preflight Findings And Plan
@@ -139,10 +139,10 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Phase 0 `git diff --check`: `PASSED`
 - Phase 0 changed-file/stat review: `PASSED` (`NIGHT_RUN_STATE.md`, 167 lines before gate-result update)
 - Phase 0 prohibited-file review: `PASSED` (no prohibited file modified)
-- Phase-specific tests: `NOT_RUN`
-- `git diff --check`: `NOT_RUN`
-- Full regression: `NOT_RUN`
-- iOS Simulator tests: `NOT_RUN`
+- Phase 5 phase-specific tests: `NOT_RUN`
+- Phase 5 `git diff --check`: `NOT_RUN`
+- Phase 5 full regression: `NOT_RUN`
+- Phase 5 iOS Simulator tests: `NOT_RUN`
 - Real Zhipu smoke: `SKIPPED` (no supported API key environment variable present)
 - Phase 2A focused evidence parsing tests: `PASSED` (15/15)
 - Phase 2A Zhipu client regressions: `PASSED` (33/33)
@@ -179,6 +179,20 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Phase 3 prohibited-file review: `PASSED` (no CI, signing, entitlement, project, Onboarding, Profile, risk-rule, ActionCard mapping, or Presentation file modified)
 - Phase 3 secret-pattern review: `PASSED` (no credential value found; the sole broad-pattern hit was the defensive `baseURL.password == nil` check)
 - Phase 3 canonical-implementation review: `PASSED` (one existing MedicineResolver, MedicinePipeline, MedicationRiskEngine, and ActionCardFactory implementation remains)
+- Phase 4 Core routing/composition tests: `PASSED` (19/19 focused; 414/414 full Core)
+- Phase 4 Presentation source-notice tests: `PASSED` (6/6 focused, 1/1 view order; 74/74 full Presentation)
+- Phase 4 Server regression: `PASSED` (211/211, 0 failures; 1 live network test skipped by explicit opt-in gate)
+- Phase 4 iOS focused composition tests: `PASSED` (73/73 across four suites after one localized asynchronous test synchronization fix; 0 failures)
+- Phase 4 independent iOS privacy/configuration review: `PASSED` (14/14; `P0=0`, `P1=0`)
+- Phase 4 neutral capability/configuration regression: `PASSED` (26/26 across two suites on iPhone 17 Pro Simulator, iOS 26.5; `** TEST SUCCEEDED **`)
+- Phase 4 final combined iOS composition gate: `PASSED` (89/89 across five suites on iPhone 17 Pro Simulator, iOS 26.5; 0 failures; `** TEST SUCCEEDED **`)
+- Phase 4 repository `git diff --check`: `PASSED` after the final privacy-copy correction
+- Phase 4 staged `git diff --check`: `PASSED` (all tracked and newly added files)
+- Phase 4 changed-file/stat review: `PASSED` (28 files; staged snapshot before final state additions was `+2958/-130`)
+- Phase 4 prohibited-file review: `PASSED` (no CI workflow, Package manifest, entitlement, Onboarding, Profile, risk-rule, or ActionCard file modified)
+- Phase 4 project-setting review: `PASSED` (`project.pbxproj` changes are limited to Debug/Release camera and photo-library usage descriptions; no signing, team, entitlement, or bundle identifier change)
+- Phase 4 secret/log review: `PASSED` (no production logging calls or credential value; the only broad-pattern hit is the explicit fake `Bearer not-a-real-token` negative test fixture)
+- Phase 4 canonical-implementation review: `PASSED` (one existing MedicineResolver, MedicinePipeline, MedicationRiskEngine, and ActionCardFactory implementation remains)
 
 ## Phase Change Records
 
@@ -278,19 +292,52 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Privacy wording requirement: current capability/permission copy claims device-only behavior and must be updated wherever online recognition is enabled; any Xcode project edit is limited to usage-description text and must not touch signing, entitlements, or bundle identifiers.
 - Package manifest changes required: `NONE`.
 - Third-party dependencies required: `NONE`.
+- Implementation ownership is split across non-overlapping boundaries: Core routing/coordinator, iOS preference/configuration, and Presentation source notice. `AppEnvironment`, runner, submitter, Settings, capability wording, and privacy usage descriptions remain the single root-agent composition pass after those types stabilize.
+- Privacy usage-description correction completed: Debug and Release camera/photo prompts now disclose conditional upload to the configured recognition service and the device-only setting. No signing, entitlement, bundle identifier, or capability setting changed.
+- Capability-source update completed: the historical `.phase0` fixture remains intact, while the current composition can now truthfully distinguish device-only operation from optional online-first recognition with a real local fallback. This availability vocabulary is not connected to risk levels or medical rules.
+- Capability model tests added for distinct hybrid/local/online semantics and configuration-dependent mainline status; the final combined Simulator gate passed `89/89`.
+- Presentation source/degradation mapping completed: remote success remains quiet; local-only and recoverable fallback use fixed non-technical notices that also render without recognition text. Focused notice tests passed 6/6, view-order test passed 1/1, full Presentation passed 74/74, and Presentation `git diff --check` passed.
+- Core remote-first routing and canonical cross-check implementation passed its hardened gate: routing/Coordinator focused 19/19, full Core 414/414, and repository `git diff --check` passed. Candidate confirmation rejects a response whose selected ID differs from the exact user-selected candidate; request-ID mismatch, unknown-error no-fallback, stale return value, and resolved fallback-context regressions are directly covered.
+- iOS composition implementation is wired and Simulator-validated: only a validated configured endpoint creates the remote requester; absent configuration forces the existing local-only coordinator; privacy mode is snapshotted once per submission; Settings copy distinguishes device-only, configured-online, and unconfigured-local behavior.
+- iOS runbook updated with the endpoint configuration key and precedence, HTTPS/loopback policy, local-only behavior when unconfigured, privacy-mode snapshot semantics, health-data isolation, fallback whitelist, and current adapter validation limits.
+- Phase 4 iOS focused Simulator first run: `69/70` passed. The sole failure was an existing confirmation test reading the asynchronously consumed state immediately after the runner completed; it was localized and the test now waits for the current gate's `.result` without weakening production validation. The targeted and complete focused reruns then passed; the first run is retained as diagnostic history and is not counted as a passed gate.
+- Phase 4 iOS focused Simulator complete rerun: `73/73` across four suites, `0` failures, `xcodebuild` exit `0`. Covered configured remote success, recoverable Server failure to local fallback, remote ambiguity without local overwrite, configured privacy mode, missing endpoint local-only behavior, one-time mode snapshot, and nil/foreign request-ID filtering.
+- Phase 4 root SwiftPM gate: full Core `414/414`, full Presentation `74/74`, and full Server `211/211` passed with `0` failures; the single Server live-network test remained skipped behind its explicit opt-in credential gate.
+- iOS composition author review: `P0=0`, `P1=0`; focused Simulator `73/73`, Swift 6 configuration typecheck, whitespace checks, and production log/credential/body scans passed. `P2`: no production Server URL is stored in the repository; deployment must inject the documented key, and missing/invalid configuration intentionally stays device-only.
+- Independent iOS review: `P0=0`, `P1=0`; independent privacy/configuration Simulator checks passed `14/14`. The reviewer found that configured capability copy said "online preferred" even when the user selected device-only mode; the capability copy was changed to neutral "online and offline available" wording and its focused regression passed `26/26`.
+- Independent Core review: `P0=0`, `P1=0`; fallback whitelist, canonical witness rejection, confirmation binding, generation/cancellation, and single-pipeline boundaries passed. One non-blocking `P2` remains: public routing context initializers can represent combinations that production routers never emit; production constructors are valid and the broader API refactor is intentionally deferred.
 - Architecture blocker: `NO` for implementation and Fake integration tests; real iOS online smoke remains limited by the absent deployment URL and Provider credential.
+
+### Phase 4 Implementation
+
+- Added: `ios/SlowWalkApp/Services/MedicineRecognition/MedicineRecognitionPreferences.swift`
+- Added: `ios/SlowWalkApp/Services/MedicineRecognition/MedicineRecognitionServerConfiguration.swift`
+- Added: `ios/SlowWalkAppTests/MedicineRecognition/MedicineRecognitionPreferencesTests.swift`
+- Added: `ios/SlowWalkAppTests/MedicineRecognition/MedicineRecognitionServerConfigurationTests.swift`
+- Added: `swift-packages/SlowWalkCore/Sources/SlowWalkClientCore/MedicineRecognitionRouting.swift`
+- Added: `swift-packages/SlowWalkCore/Tests/SlowWalkClientCoreTests/MedicineAssessmentCoordinatorRoutingTests.swift`
+- Added: `swift-packages/SlowWalkCore/Tests/SlowWalkClientCoreTests/MedicineRecognitionRoutingTests.swift`
+- Added: `swift-packages/SlowWalkPresentation/Tests/SlowWalkPresentationTests/RecognitionNoticeTests.swift`
+- Modified iOS composition: `ios/README.md`, `ios/SlowWalkApp.xcodeproj/project.pbxproj`, `AppEnvironment.swift`, `AppCapability.swift`, `MedicineAssessmentRunner.swift`, `MedicineAssessmentCaptureSubmitter.swift`, and `CareSettingsView.swift`.
+- Modified iOS tests: `CapabilitySourceOfTruthTests.swift`, `CapabilityStatusTests.swift`, and `MedicineAssessmentRunnerTests.swift`.
+- Modified Core: `ClientFailures.swift`, `ClientViewStates.swift`, `MedicineAssessmentCoordinator.swift`, and `ClientFailureMapperTests.swift`.
+- Modified Presentation: `MedicinePresentationCopy.swift`, `MedicineStateMapper.swift`, `MedicineDisplayState.swift`, `MedicineAssessmentView.swift`, and `AccessibilityValueTests.swift`.
+- Business/test diff excluding the run-state file: `+2931/-125`.
+- Final pre-archive review: `P0=0`, `P1=0`, `P2=2` (deployment URL injection and public routing-context representability limitations recorded below).
+- Package manifest, CI workflow, signing, entitlement, bundle identifier, Onboarding, Profile, risk-rule, and ActionCard semantic changes: `NONE`.
+- Third-party dependency changes: `NONE`.
 
 ## Known Issues
 
 - Real provider behavior cannot be verified in this run because no API key is available; Fake Client coverage remains required.
 - The controlled demo catalog has no trusted manufacturer or approval identifiers; production matching for those fields remains unavailable until controlled metadata is supplied.
-- The iOS app currently has no Server base URL configuration. Fake transport coverage and local fallback are not blocked; real iOS online smoke remains unavailable without an externally supplied URL.
+- The repository intentionally contains no production iOS Server base URL value. The validated environment/Info dictionary configuration mechanism is implemented, but real iOS online smoke remains unavailable until deployment injects a URL.
 - P2: the Server validates declared MIME and size but does not inspect image magic bytes; bytes are only forwarded through the bounded Provider request and never executed or decoded on the Server.
 - P2: 2C has no explicit RiskEngine zero-call spy; its recognition controller/service dependency graph contains no RiskEngine or assessment dependency, and strict request decoding rejects health fields.
 - P2: a deliberately cancellation-ignoring extractor task can remain alive briefly after the API timeout; the API returns without waiting, late output cannot be published, and the production URLSession transport cooperates with cancellation.
 - P2: the strict iOS response mapper mirrors Server evidence-assurance rules for protocol validation; future rule changes require shared contract fixtures or an explicit stable assurance witness to prevent drift.
-- P2: stale-result suppression, duplicate submission, and one-active-task behavior remain intentionally owned by the Phase 4 composition layer; the Phase 3 requester is stateless and only proves independent request correlation.
 - P2: the Server's over-limit candidate/witness projection is covered at helper level; a controller-to-DTO-to-iOS-mapper extreme integration fixture remains a Phase 4/5 hardening opportunity.
+- P2: public `MedicineRecognitionContext`/routing outcome initializers can represent inconsistent source/reason or missing-witness combinations, although the production remote-first and local-only routers emit only valid combinations.
 
 ## Blockers
 
@@ -298,7 +345,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 
 ## Next Action
 
-- Implement the audited stateless remote-first router, canonical cross-check, privacy preference, AppEnvironment wiring, and non-medical fallback provenance without changing medical risk rules or ActionCard semantics.
+- Create and push the Phase 4 implementation commit and annotated checkpoint, record its SHA/tag in a state-only commit, then run the Phase 5 repository-wide CI-equivalent regression and credential-gated smoke decision.
 
 ## Safety Record
 

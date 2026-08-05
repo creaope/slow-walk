@@ -59,6 +59,37 @@ final class ClientFailureMapperTests: XCTestCase {
         XCTAssertFalse(failure.isRecoverable)
     }
 
+    func testOnlineRecognitionProtocolFailureIsNonRecoverable() {
+        let failure = ClientFailureMapper.map(
+            OnlineMedicineRecognitionFailure.invalidResponse
+        )
+
+        XCTAssertEqual(failure.kind, .malformedResponse)
+        XCTAssertEqual(failure.endpoint, .medicineRecognize)
+        XCTAssertFalse(failure.isRecoverable)
+    }
+
+    func testOnlineRecognitionImageSizeFailureUsesCanonicalCode() {
+        let failure = ClientFailureMapper.map(
+            OnlineMedicineRecognitionFailure.imageTooLarge
+        )
+
+        XCTAssertEqual(failure.kind, .api)
+        XCTAssertEqual(failure.apiErrorCode, .imageTooLarge)
+        XCTAssertEqual(failure.endpoint, .medicineRecognize)
+        XCTAssertFalse(failure.isRecoverable)
+    }
+
+    func testOnlineRecognitionTimeoutRemainsRecoverable() {
+        let failure = ClientFailureMapper.map(
+            OnlineMedicineRecognitionFailure.timeout
+        )
+
+        XCTAssertEqual(failure.kind, .timeout)
+        XCTAssertEqual(failure.endpoint, .medicineRecognize)
+        XCTAssertTrue(failure.isRecoverable)
+    }
+
     private func makeAPIError(code: APIErrorCode) -> APIErrorDTO {
         APIErrorDTO(
             code: code,

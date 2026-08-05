@@ -9,18 +9,20 @@ import SlowWalkDomain
 public actor MedicineAssessmentCoordinator {
     private struct OperationOutcome: Sendable {
         let state: MedicineAssessmentViewState
-        let pendingRequest: MedicineAssessmentRequestDTO?
+        let pendingConfirmation: PendingConfirmation?
     }
 
     private struct PendingConfirmation: Sendable {
         let request: MedicineAssessmentRequestDTO
         let candidateIDs: Set<String>
+        let recognitionContext: MedicineRecognitionContext
+        let expectedCanonicalMedicineID: String?
+        let expectedCanonicalMedicineName: String?
     }
 
     public private(set) var state: MedicineAssessmentViewState = .idle
 
-    private let recognizer: any MedicineTextRecognizing
-    private let mapper: MedicineRecognitionInputMapper
+    private let recognitionRouter: any MedicineRecognitionRouting
     private let requestBuilder: any MedicineAssessmentRequestBuilding
     private let requester: any MedicineAssessmentRequesting
     private let confirmer: (any MedicineCandidateConfirming)?
@@ -36,6 +38,26 @@ public actor MedicineAssessmentCoordinator {
         [UUID: AsyncStream<MedicineAssessmentStateUpdate>.Continuation] = [:]
 
     public init(
+        recognitionRouter: any MedicineRecognitionRouting,
+        requestBuilder: any MedicineAssessmentRequestBuilding =
+            MedicineAssessmentRequestBuilder(),
+        requester: any MedicineAssessmentRequesting,
+        confirmer: (any MedicineCandidateConfirming)? = nil,
+        responseValidator: MedicineAssessmentResponseValidator = .init(),
+        clock: any Clock,
+        apiVersion: String = SlowWalkAPI.version
+    ) {
+        self.recognitionRouter = recognitionRouter
+        self.requestBuilder = requestBuilder
+        self.requester = requester
+        self.confirmer = confirmer
+        self.responseValidator = responseValidator
+        self.clock = clock
+        self.apiVersion = apiVersion
+    }
+
+    /// Compatibility initializer for existing on-device-only compositions.
+    public init(
         recognizer: any MedicineTextRecognizing,
         mapper: MedicineRecognitionInputMapper,
         requestBuilder: any MedicineAssessmentRequestBuilding =
@@ -46,8 +68,10 @@ public actor MedicineAssessmentCoordinator {
         clock: any Clock,
         apiVersion: String = SlowWalkAPI.version
     ) {
-        self.recognizer = recognizer
-        self.mapper = mapper
+        recognitionRouter = OnDeviceMedicineRecognitionRouter(
+            recognizer: recognizer,
+            mapper: mapper
+        )
         self.requestBuilder = requestBuilder
         self.requester = requester
         self.confirmer = confirmer
@@ -65,13 +89,15 @@ public actor MedicineAssessmentCoordinator {
         imageInput: OCRImageInput,
         userProfile: UserHealthProfile,
         recentRecords: [MedicationRecord],
-        requestID: UUID
+        requestID: UUID,
+        mode: MedicineRecognitionMode = .remotePreferred
     ) async -> MedicineAssessmentViewState {
         await assess(
             imageInput: imageInput,
             userProfile: UserHealthProfileDTO(userProfile),
             recentRecords: recentRecords.map(MedicationRecordDTO.init),
-            requestID: requestID
+            requestID: requestID,
+            mode: mode
         )
     }
 
@@ -105,14 +131,14 @@ public actor MedicineAssessmentCoordinator {
         imageInput: OCRImageInput,
         userProfile: UserHealthProfileDTO,
         recentRecords: [MedicationRecordDTO],
-        requestID: UUID
+        requestID: UUID,
+        mode: MedicineRecognitionMode = .remotePreferred
     ) async -> MedicineAssessmentViewState {
         beginOperation(with: .recognizing(startedAt: clock.now()))
         pendingConfirmation = nil
         let operationGeneration = generation
 
-        let recognizer = self.recognizer
-        let mapper = self.mapper
+        let recognitionRouter = self.recognitionRouter
         let requestBuilder = self.requestBuilder
         let requester = self.requester
         let responseValidator = self.responseValidator
@@ -122,14 +148,13 @@ public actor MedicineAssessmentCoordinator {
         let task = Task<OperationOutcome, Never> {
             do {
                 try Task.checkCancellation()
-                let observations = try await recognizer.recognizeText(
-                    in: imageInput
+                let routingOutcome = try await recognitionRouter.recognize(
+                    imageInput: imageInput,
+                    requestID: requestID,
+                    mode: mode
                 )
                 try Task.checkCancellation()
-                let recognitionInput = mapper.map(
-                    observations: observations,
-                    capturedAt: imageInput.capturedAt
-                )
+                let recognitionInput = routingOutcome.recognitionInput
 
                 guard !recognitionInput.recognizedTexts.isEmpty else {
                     return OperationOutcome(
@@ -137,10 +162,12 @@ public actor MedicineAssessmentCoordinator {
                             MedicineConfirmationRequirement(
                                 reason: .noRecognizedText,
                                 recognitionInput: recognitionInput,
-                                response: nil
+                                response: nil,
+                                recognitionContext:
+                                    routingOutcome.recognitionContext
                             )
                         ),
-                        pendingRequest: nil
+                        pendingConfirmation: nil
                     )
                 }
 
@@ -160,29 +187,56 @@ public actor MedicineAssessmentCoordinator {
                 try Task.checkCancellation()
                 try responseValidator.validate(response, for: request)
 
+                guard Self.response(
+                    response,
+                    matchesExpectedIdentityFrom: routingOutcome
+                ) else {
+                    return OperationOutcome(
+                        state: Self.unresolvedIdentityState(
+                            recognitionInput: recognitionInput,
+                            recognitionContext:
+                                routingOutcome.recognitionContext
+                        ),
+                        pendingConfirmation: nil
+                    )
+                }
+
                 let nextState = Self.viewState(
                     response: response,
-                    recognitionInput: recognitionInput
+                    recognitionInput: recognitionInput,
+                    recognitionContext:
+                        routingOutcome.recognitionContext
                 )
-                let pendingRequest: MedicineAssessmentRequestDTO?
-                if Self.needsCandidateConfirmation(nextState) {
-                    pendingRequest = request
-                } else {
-                    pendingRequest = nil
-                }
                 return OperationOutcome(
                     state: nextState,
-                    pendingRequest: pendingRequest
+                    pendingConfirmation: Self.pendingConfirmation(
+                        for: nextState,
+                        request: request,
+                        recognitionContext:
+                            routingOutcome.recognitionContext,
+                        expectedCanonicalMedicineID:
+                            routingOutcome.expectedCanonicalMedicineID,
+                        expectedCanonicalMedicineName:
+                            routingOutcome.expectedCanonicalMedicineName
+                    )
                 )
             } catch is CancellationError {
                 return OperationOutcome(
                     state: .cancelled,
-                    pendingRequest: nil
+                    pendingConfirmation: nil
+                )
+            } catch let failure as OnlineMedicineRecognitionFailure {
+                return OperationOutcome(
+                    state: Self.viewState(
+                        for: failure,
+                        capturedAt: imageInput.capturedAt
+                    ),
+                    pendingConfirmation: nil
                 )
             } catch {
                 return OperationOutcome(
                     state: .failed(ClientFailureMapper.map(error)),
-                    pendingRequest: nil
+                    pendingConfirmation: nil
                 )
             }
         }
@@ -218,26 +272,62 @@ public actor MedicineAssessmentCoordinator {
                 )
                 try Task.checkCancellation()
                 try responseValidator.validate(response, for: request)
+                guard response.resolution.selectedMedicine?.id == candidateID
+                else {
+                    throw MedicineAssessmentResponseValidationError
+                        .invalidResolution
+                }
+
+                let routingOutcome = MedicineRecognitionRoutingOutcome(
+                    recognitionInput: request.input,
+                    recognitionContext:
+                        pendingConfirmation.recognitionContext,
+                    expectedCanonicalMedicineID:
+                        pendingConfirmation.expectedCanonicalMedicineID,
+                    expectedCanonicalMedicineName:
+                        pendingConfirmation.expectedCanonicalMedicineName
+                )
+                guard Self.response(
+                    response,
+                    matchesExpectedIdentityFrom: routingOutcome
+                ) else {
+                    return OperationOutcome(
+                        state: Self.unresolvedIdentityState(
+                            recognitionInput: request.input,
+                            recognitionContext:
+                                pendingConfirmation.recognitionContext
+                        ),
+                        pendingConfirmation: nil
+                    )
+                }
                 let nextState = Self.viewState(
                     response: response,
-                    recognitionInput: request.input
+                    recognitionInput: request.input,
+                    recognitionContext:
+                        pendingConfirmation.recognitionContext
                 )
                 return OperationOutcome(
                     state: nextState,
-                    pendingRequest:
-                        Self.needsCandidateConfirmation(nextState)
-                        ? request
-                        : nil
+                    pendingConfirmation: Self.pendingConfirmation(
+                        for: nextState,
+                        request: request,
+                        recognitionContext:
+                            pendingConfirmation.recognitionContext,
+                        expectedCanonicalMedicineID:
+                            pendingConfirmation.expectedCanonicalMedicineID,
+                        expectedCanonicalMedicineName:
+                            pendingConfirmation.expectedCanonicalMedicineName
+                    )
                 )
             } catch is CancellationError {
                 return OperationOutcome(
                     state: .cancelled,
-                    pendingRequest: nil
+                    pendingConfirmation: nil
                 )
             } catch {
                 return OperationOutcome(
                     state: .failed(ClientFailureMapper.map(error)),
-                    pendingRequest: nil
+                    pendingConfirmation: nil
                 )
             }
         }
@@ -278,22 +368,7 @@ public actor MedicineAssessmentCoordinator {
             onCancel: { task.cancel() }
         )
         if activeGeneration == operationGeneration {
-            if let request = outcome.pendingRequest,
-                case .requiresMedicineConfirmation(let requirement) =
-                    outcome.state,
-                let response = requirement.response
-            {
-                pendingConfirmation = PendingConfirmation(
-                    request: request,
-                    candidateIDs: Set(
-                        response.resolution.candidates.map {
-                            $0.medicine.id
-                        }
-                    )
-                )
-            } else {
-                pendingConfirmation = nil
-            }
+            pendingConfirmation = outcome.pendingConfirmation
             publish(outcome.state)
             activeTask = nil
             activeGeneration = nil
@@ -337,16 +412,129 @@ public actor MedicineAssessmentCoordinator {
         }
     }
 
+    private static func pendingConfirmation(
+        for state: MedicineAssessmentViewState,
+        request: MedicineAssessmentRequestDTO,
+        recognitionContext: MedicineRecognitionContext,
+        expectedCanonicalMedicineID: String?,
+        expectedCanonicalMedicineName: String?
+    ) -> PendingConfirmation? {
+        guard needsCandidateConfirmation(state),
+              case .requiresMedicineConfirmation(let requirement) = state,
+              let response = requirement.response
+        else {
+            return nil
+        }
+        return PendingConfirmation(
+            request: request,
+            candidateIDs: Set(
+                response.resolution.candidates.map { $0.medicine.id }
+            ),
+            recognitionContext: recognitionContext,
+            expectedCanonicalMedicineID: expectedCanonicalMedicineID,
+            expectedCanonicalMedicineName: expectedCanonicalMedicineName
+        )
+    }
+
+    private static func response(
+        _ response: MedicineAssessmentResponseDTO,
+        matchesExpectedIdentityFrom outcome:
+            MedicineRecognitionRoutingOutcome
+    ) -> Bool {
+        let expectedID = outcome.expectedCanonicalMedicineID
+        let expectedName = outcome.expectedCanonicalMedicineName
+        guard outcome.source == .remote,
+              expectedID != nil || expectedName != nil
+        else {
+            return true
+        }
+        guard let selectedMedicine =
+            response.resolution.selectedMedicine
+        else {
+            return false
+        }
+        if let expectedID, selectedMedicine.id != expectedID {
+            return false
+        }
+        if let expectedName,
+           selectedMedicine.canonicalName != expectedName
+        {
+            return false
+        }
+        return true
+    }
+
+    private static func unresolvedIdentityState(
+        recognitionInput: MedicineRecognitionInput,
+        recognitionContext: MedicineRecognitionContext
+    ) -> MedicineAssessmentViewState {
+        .requiresMedicineConfirmation(
+            MedicineConfirmationRequirement(
+                reason: .unresolvedMedicine,
+                recognitionInput: recognitionInput,
+                response: nil,
+                recognitionContext: recognitionContext
+            )
+        )
+    }
+
+    private static func viewState(
+        for failure: OnlineMedicineRecognitionFailure,
+        capturedAt: Date
+    ) -> MedicineAssessmentViewState {
+        let recognitionInput = MedicineRecognitionInput(
+            recognizedTexts: [],
+            capturedAt: capturedAt,
+            languageCode: nil,
+            rawConfidence: nil
+        )
+        switch failure {
+        case .ambiguous:
+            return .requiresMedicineConfirmation(
+                MedicineConfirmationRequirement(
+                    reason: .ambiguousMedicine,
+                    recognitionInput: recognitionInput,
+                    response: nil,
+                    recognitionContext: .remote
+                )
+            )
+        case .noCandidate:
+            return .requiresMedicineConfirmation(
+                MedicineConfirmationRequirement(
+                    reason: .unresolvedMedicine,
+                    recognitionInput: recognitionInput,
+                    response: nil,
+                    recognitionContext: .remote
+                )
+            )
+        case .unreadable:
+            return .requiresMedicineConfirmation(
+                MedicineConfirmationRequirement(
+                    reason: .noRecognizedText,
+                    recognitionInput: recognitionInput,
+                    response: nil,
+                    recognitionContext: .remote
+                )
+            )
+        case .offline, .timeout, .rateLimited, .serverUnavailable,
+             .providerUnavailable, .invalidImage, .imageTooLarge,
+             .invalidResponse:
+            return .failed(ClientFailureMapper.map(failure))
+        }
+    }
+
     private static func viewState(
         response: MedicineAssessmentResponseDTO,
-        recognitionInput: MedicineRecognitionInput
+        recognitionInput: MedicineRecognitionInput,
+        recognitionContext: MedicineRecognitionContext
     ) -> MedicineAssessmentViewState {
         if response.resolution.status == .ambiguous {
             return .requiresMedicineConfirmation(
                 MedicineConfirmationRequirement(
                     reason: .ambiguousMedicine,
                     recognitionInput: recognitionInput,
-                    response: response
+                    response: response,
+                    recognitionContext: recognitionContext
                 )
             )
         }
@@ -355,7 +543,8 @@ public actor MedicineAssessmentCoordinator {
                 MedicineConfirmationRequirement(
                     reason: .unresolvedMedicine,
                     recognitionInput: recognitionInput,
-                    response: response
+                    response: response,
+                    recognitionContext: recognitionContext
                 )
             )
         }
@@ -364,10 +553,16 @@ public actor MedicineAssessmentCoordinator {
                 MedicineConfirmationRequirement(
                     reason: .serverRequiresConfirmation,
                     recognitionInput: recognitionInput,
-                    response: response
+                    response: response,
+                    recognitionContext: recognitionContext
                 )
             )
         }
-        return .result(MedicineAssessmentPresentation(response: response))
+        return .result(
+            MedicineAssessmentPresentation(
+                response: response,
+                recognitionContext: recognitionContext
+            )
+        )
     }
 }

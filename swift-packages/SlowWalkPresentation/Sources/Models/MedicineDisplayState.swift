@@ -116,6 +116,12 @@ public struct MedicineDisplayState:
     /// `nil` while no recognition evidence is available.
     public let recognition: MedicineRecognitionDisplay?
 
+    /// Optional, non-medical provenance notice for the recognition attempt.
+    ///
+    /// This is independent of `recognition`: a local fallback can be visible
+    /// even when no text or medicine name was recognized.
+    public let recognitionNotice: String?
+
     /// True when the canonical coordinator state is
     /// `requiresMedicineConfirmation`.
     ///
@@ -137,6 +143,7 @@ public struct MedicineDisplayState:
         actionCard: ActionCard?,
         failure: MedicineFailureDisplay?,
         recognition: MedicineRecognitionDisplay? = nil,
+        recognitionNotice: String? = nil,
         requiresMedicineConfirmation: Bool,
         demoDisclaimer: String? = nil
     ) {
@@ -144,6 +151,7 @@ public struct MedicineDisplayState:
         self.actionCard = actionCard
         self.failure = failure
         self.recognition = recognition
+        self.recognitionNotice = recognitionNotice
         self.requiresMedicineConfirmation =
             requiresMedicineConfirmation
         self.demoDisclaimer = demoDisclaimer

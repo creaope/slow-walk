@@ -2,10 +2,10 @@
 
 此目录保存 Apple 平台专属源码。可由 Linux 验证的客户端 use-case protocol、
 View state、request builder、协调器、mock 与 bounded location history 已统一放入
-`SlowWalkClientCore`。正式 Xcode 工程已经落地，并已完成无签名 generic iOS
-Simulator 构建；该结果只验证最小 SwiftUI app shell 与核心 Package 接入，不代表
-已经验证 Vision、CoreLocation、AVFoundation、SwiftData、ActivityKit、相机权限
-或真机行为。
+`SlowWalkClientCore`。正式 Xcode 工程已经落地。药品采集已接入 AVFoundation/
+相册、Apple Vision 设备内文字识别、可选的在线包装识别客户端，以及既有
+canonical 药品评估管线。Simulator 测试不代表已经验证 CoreLocation、SwiftData、
+ActivityKit、相机权限弹窗或真机行为。
 
 ## 计划结构
 
@@ -59,6 +59,22 @@ xcodebuild \
   build
 ```
 
+## 在线药品包装识别配置
+
+在线识别端点由 `AppEnvironment` 统一读取，不在 View 中创建客户端或读取 URL：
+
+- 配置键：`SLOWWALK_MEDICINE_RECOGNITION_BASE_URL`
+- 优先级：显式注入、进程环境、Info.plist
+- 远程地址只接受 HTTPS；开发环境允许 `localhost`、`127.0.0.1` 和 `::1` 使用 HTTP
+- 配置缺失或无效时不发起网络请求，直接使用设备内识别
+- “仅在设备上识别”设置会在提交时快照；开启后不会尝试在线请求
+
+在线请求只包含规范化后的药品包装图片与请求 ID，不包含用户健康档案或用药记录。
+健康资料仅在识别完成后进入既有本地 `MedicinePipeline` 与风险引擎。在线结果为
+`ambiguous`、`noCandidate`、`unreadable`、协议错误或 canonical identity 冲突时，
+不会用本地模糊结果静默覆盖；只有离线、超时、限流、Server/Provider 不可用等明确
+可恢复错误才进入 Apple Vision 本地兜底。
+
 ## 依赖边界
 
 - `App/` 是 iOS 组合根，负责把平台实现注入 Feature。
@@ -69,8 +85,10 @@ xcodebuild \
 - Feature/View 不直接创建 URLSession、Repository、Clock 或定位对象。
 - 任何 Apple 平台类型都不得加入 `SlowWalkCore` 的跨平台 SwiftPM target。
 - 风险等级由核心引擎或服务端计算，View 只显示结果，不复制规则。
-- Medicine network adapter 只实现 `MedicineAssessmentRequesting`，Location network
-  adapter 只实现 `LocationAssessmentRequesting`；两者只传输 canonical API DTO。
+- 在线包装识别 adapter 只实现 `OnlineMedicineRecognitionRequesting`，其请求类型在
+  编译期不包含健康资料；本地评估仍使用既有 `MedicineAssessmentRequesting`。
+- Location network adapter 只实现 `LocationAssessmentRequesting`；各 adapter 只传输
+  自己边界内的 canonical API DTO。
 - 旧 raw risk DTO 与 `/api/v1/risk/assess` 已关闭；iOS 不得构造或提交完整
   `Medicine`、ingredient 或 `SourceReference`。
 - 错误分支统一按 typed `APIErrorCode` 处理；旧 lowercase code 只由 contracts
@@ -83,11 +101,13 @@ xcodebuild \
 
 ```text
 OCRImageInput
-  → MedicineTextRecognizing
-  → [RecognizedTextObservation]
-  → MedicineRecognitionInputMapper
+  → RemoteFirstMedicineRecognitionRouter
+      → configured remote recognition (image + request ID only)
+      → approved recoverable failure: Apple Vision + local mapper
+  → existing MedicineRecognitionInput
   → MedicineAssessmentRequestDTO
-  → MedicineAssessmentRequesting
+  → LocalMedicineAssessmentRequester
+  → existing MedicinePipeline / MedicineResolver / MedicationRiskEngine
   → MedicineAssessmentViewState
 
 LocationSampleProviding
@@ -129,7 +149,6 @@ LocationSampleProviding
 - 日后引入真实数据前必须完成隐私清单、保留期限和删除流程评审。
 - 任何演示数据都标注 `DEMO DATA — NOT FOR CLINICAL USE`。
 
-上述四个 Apple adapter 当前仅有接口预期和命名，尚未实现。当前已经在 Mac/Xcode
-验证最小 SwiftUI shell、三个核心产品的直接 import 与 Apple 平台 Swift 6 编译；
-尚未验证 Vision、CoreLocation、URLSession adapter、权限或真机行为。模拟器构建
-不能替代真机验证。
+药品相机采集、Vision OCR 和在线包装识别 URLSession adapter 已有 Simulator
+单元/组合测试。CoreLocation、受保护持久化、位置网络 adapter 与真机权限流程仍需
+后续实现或验证；Simulator 构建不能替代真机验证。
