@@ -7,6 +7,7 @@ public enum SlowWalkAPI {
     public enum Endpoint: String, Sendable, CaseIterable, Hashable {
         case medicineSearch = "/medicine/search"
         case medicineResolve = "/medicine/resolve"
+        case medicineRecognize = "/medicine/recognize"
         case medicineAssess = "/medicine/assess"
         case locationAssess = "/location/assess"
 
@@ -38,6 +39,21 @@ public enum SlowWalkAPI {
                     .medicineAmbiguous,
                     .medicineRecognitionFailed,
                     .medicineInsufficientEvidence,
+                    .internalError,
+                ]
+            case .medicineRecognize:
+                return transport + [
+                    .requestBodyTooLarge,
+                    .imageTooLarge,
+                    .medicineAmbiguous,
+                    .medicineRecognitionFailed,
+                    .medicineInsufficientEvidence,
+                    .medicineNotFound,
+                    .sourceConflict,
+                    .providerRateLimited,
+                    .providerUnavailable,
+                    .providerTimeout,
+                    .invalidProviderResponse,
                     .internalError,
                 ]
             case .medicineAssess:

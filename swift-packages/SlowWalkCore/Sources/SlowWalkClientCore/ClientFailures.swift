@@ -104,7 +104,9 @@ public enum ClientFailureMapper {
         _ error: any Error
     ) -> ClientFailure {
         if let apiError = error as? ClientAPIError {
-            if apiError.error.code == .knowledgeSourceTimeout {
+            if apiError.error.code == .knowledgeSourceTimeout
+                || apiError.error.code == .providerTimeout
+            {
                 return ClientFailure(
                     kind: .timeout,
                     apiErrorCode: apiError.error.code,
@@ -191,12 +193,18 @@ public enum ClientFailureMapper {
         case .knowledgeSourceUnavailable,
              .knowledgeSourceTimeout,
              .offlineCacheUnavailable,
+             .providerRateLimited,
+             .providerUnavailable,
+             .providerTimeout,
+             .invalidProviderResponse,
              .internalError:
             return true
         case .malformedRequest,
              .unsupportedMediaType,
              .unsupportedAPIVersion,
              .validationError,
+             .requestBodyTooLarge,
+             .imageTooLarge,
              .invalidUserProfile,
              .unsupportedProfileSchema,
              .invalidMedicationRecord,

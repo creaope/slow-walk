@@ -19,8 +19,8 @@
 | --- | --- | --- | --- | --- | --- |
 | 0 - Preflight | PASSED_WITH_LIMITATION | `775de0f2ec82ee1e1779f94c021011639ae29593` | `23032be22ef00ca8ffa0e4721bbfe5396f6d8040` | `checkpoint/zhipu-night-0-preflight` | Branch/baseline/remote/architecture/CI/assets audit passed; archive gates passed |
 | 2A - Structured package evidence | PASSED | `cdf1c11ea450328144c4515c8ea5f403e2eb6200` | `1a33db77b7682290fc698de4263a26e7b561cf2c` | `checkpoint/zhipu-night-2a-evidence` | Full Server suite: 171 passed, 1 live smoke skipped, 0 failed |
-| 2B - Controlled retrieval and verification | PASSED | `e35eaa58116500cc212ba9797f61e6720fe8ae82` | PENDING (this record commit) | `checkpoint/zhipu-night-2b-resolution` | Focused 22/22 and full Server 193 passed; 1 live smoke skipped; 0 failed |
-| 2C - Server recognition API | IN_PROGRESS | PENDING | PENDING | PENDING | NOT_RUN |
+| 2B - Controlled retrieval and verification | PASSED | `e35eaa58116500cc212ba9797f61e6720fe8ae82` | `9a0d2d0bb9770aa373c6ffe1b1e5eeb40880f80a` | `checkpoint/zhipu-night-2b-resolution` | Focused 22/22 and full Server 193 passed; 1 live smoke skipped; 0 failed |
+| 2C - Server recognition API | PASSED | PENDING | PENDING | PENDING | Core 365/365 and Server 209/209 passed; 1 live smoke skipped |
 | 3 - iOS remote adapter | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 | 4 - Remote-first composition | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 | 5 - Full regression and smoke | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
@@ -157,6 +157,15 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Phase 2B `git diff --check`: `PASSED` (tracked and newly added files)
 - Phase 2B changed-file/stat review: `PASSED` (4 files; gate snapshot before these result lines was `+1291/-4`)
 - Phase 2B prohibited-file and secret review: `PASSED` (controlled recognition source/tests and run-state file only; no secret pattern found)
+- Phase 2C focused recognition API/integration tests: `PASSED` (16/16)
+- Phase 2C Server route regressions: `PASSED` (5/5)
+- Phase 2C full Core suite: `PASSED` (365 executed, 0 failures)
+- Phase 2C full Server suite: `PASSED` (209 executed, 0 failures; 1 live network test skipped by explicit opt-in gate)
+- Phase 2C `git diff --check`: `PASSED`
+- Phase 2C changed-file/stat review: `PASSED` (16 files including run state; gate snapshot `+2657/-6`)
+- Phase 2C prohibited-file review: `PASSED` (no CI, signing, entitlement, project, Onboarding, Profile, risk-rule, or ActionCard mapping file modified)
+- Phase 2C secret-pattern review: `PASSED` (no credential-like added value found)
+- Phase 2C architecture/security review: `PASSED_WITH_LIMITATION` (`P0=0`, `P1=0`, three non-blocking `P2` limitations recorded below)
 
 ## Phase Change Records
 
@@ -183,12 +192,40 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Resolved review finding: a strong overlay match cannot open the resolver gate for a different medicine that shares an ordinary alias; cross-ID identity matches remain ambiguous.
 - Package manifest changes: `NONE`
 
+### Phase 2C
+
+- Modified: `server/README.md`
+- Modified: `server/Sources/SlowWalkServer/ApplicationFactory.swift`
+- Added: `server/Sources/SlowWalkServer/MedicineRecognition/MedicinePackageEvidenceExtracting.swift`
+- Added: `server/Sources/SlowWalkServer/MedicineRecognition/MedicineRecognitionAPIRequestValidator.swift`
+- Added: `server/Sources/SlowWalkServer/MedicineRecognition/RemoteMedicineRecognitionController.swift`
+- Added: `server/Sources/SlowWalkServer/MedicineRecognition/RemoteMedicineRecognitionService.swift`
+- Modified: `server/Tests/SlowWalkServerTests/SlowWalkServerTests.swift`
+- Added: `server/Tests/SlowWalkServerTests/MedicineRecognition/RemoteMedicineRecognitionServerTests.swift`
+- Modified: `swift-packages/SlowWalkCore/Sources/SlowWalkAPIContracts/APIErrorDTO.swift`
+- Modified: `swift-packages/SlowWalkCore/Sources/SlowWalkAPIContracts/SlowWalkAPI.swift`
+- Added: `swift-packages/SlowWalkCore/Sources/SlowWalkAPIContracts/MedicineRecognitionDTOs.swift`
+- Modified: `swift-packages/SlowWalkCore/Sources/SlowWalkClientCore/ClientFailures.swift`
+- Modified: `swift-packages/SlowWalkCore/Tests/SlowWalkAPIContractsTests/APIContractsTests.swift`
+- Added: `swift-packages/SlowWalkCore/Tests/SlowWalkAPIContractsTests/MedicineRecognitionDTOTests.swift`
+- Added: `swift-packages/SlowWalkCore/Tests/SlowWalkClientCoreTests/ClientFailureMapperTests.swift`
+- Business/test diff before final state updates: `+2616/-2`
+- Phase commit gate snapshot: `+2657/-6` across 16 files including state updates.
+- Review findings: `P0=0, P1=0, P2=3`
+- Resolved review finding: timeout no longer waits for an extractor that ignores cancellation, and caller cancellation wins over a nearly simultaneous Provider error.
+- Resolved review finding: invalid upstream Provider payloads remain fallback-eligible, while malformed future Server responses remain a distinct non-recoverable client protocol failure.
+- Resolved review finding: the shared request DTO strictly rejects unknown top-level and capability fields, including health/profile fields; the duplicate Server-side wire contract was removed.
+- API `requestID` semantics: correlation-only with no idempotency cache; repeated IDs are reprocessed and this is documented and tested.
+- Package manifest changes: `NONE`
+
 ## Known Issues
 
-- None identified yet.
 - Real provider behavior cannot be verified in this run because no API key is available; Fake Client coverage remains required.
 - The controlled demo catalog has no trusted manufacturer or approval identifiers; production matching for those fields remains unavailable until controlled metadata is supplied.
 - The iOS app currently has no Server base URL configuration. Fake transport coverage and local fallback are not blocked; real iOS online smoke remains unavailable without an externally supplied URL.
+- P2: the Server validates declared MIME and size but does not inspect image magic bytes; bytes are only forwarded through the bounded Provider request and never executed or decoded on the Server.
+- P2: 2C has no explicit RiskEngine zero-call spy; its recognition controller/service dependency graph contains no RiskEngine or assessment dependency, and strict request decoding rejects health fields.
+- P2: a deliberately cancellation-ignoring extractor task can remain alive briefly after the API timeout; the API returns without waiting, late output cannot be published, and the production URLSession transport cooperates with cancellation.
 
 ## Blockers
 
@@ -196,7 +233,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 
 ## Next Action
 
-- Add the shared v1 recognition DTO contract, bounded Server controller/service, stable provider/result mappings, dependency injection, and Fake extractor integration tests without running risk assessment.
+- Complete the Phase 2C diff/prohibited-scope/secret gates, create and push the phase commit and annotated checkpoint, then archive its SHA in a state-only commit before beginning the iOS remote adapter.
 
 ## Safety Record
 

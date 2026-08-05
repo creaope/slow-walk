@@ -21,6 +21,47 @@ public func makeSlowWalkApplication(
     locationRiskConfiguration:
         LocationRiskConfiguration = .demo
 ) throws -> some ApplicationProtocol {
+    let evidenceExtractor: any MedicinePackageEvidenceExtracting
+    do {
+        evidenceExtractor = try ZhipuVisionClient()
+    } catch ZhipuVisionClientError.missingCredential {
+        // Recognition remains available as an explicit provider-unavailable
+        // response when runtime credentials are intentionally absent.
+        evidenceExtractor = UnavailableMedicinePackageEvidenceExtractor()
+    }
+    return try makeSlowWalkApplication(
+        configuration: configuration,
+        riskEngine: riskEngine,
+        dateProvider: dateProvider,
+        uuidProvider: uuidProvider,
+        medicineCatalogLoader: medicineCatalogLoader,
+        medicineCache: medicineCache,
+        medicineKnowledgeSearcher: medicineKnowledgeSearcher,
+        locationRiskAssessor: locationRiskAssessor,
+        locationRiskConfiguration: locationRiskConfiguration,
+        medicinePackageEvidenceExtractor: evidenceExtractor
+    )
+}
+
+func makeSlowWalkApplication(
+    configuration: SlowWalkServerConfiguration = .init(),
+    riskEngine: any RiskAssessing = MedicationRiskEngine(),
+    dateProvider: any DateProviding = SystemDateProvider(),
+    uuidProvider: any UUIDProviding = SystemUUIDProvider(),
+    medicineCatalogLoader: any MedicineCatalogLoading =
+        BundledDemoMedicineCatalogLoader(),
+    medicineCache: any MedicineCache = InMemoryMedicineCache(),
+    medicineKnowledgeSearcher:
+        (any MedicineKnowledgeSearching)? = nil,
+    locationRiskAssessor:
+        (any LocationRiskAssessing)? = nil,
+    locationRiskConfiguration:
+        LocationRiskConfiguration = .demo,
+    medicinePackageEvidenceExtractor:
+        any MedicinePackageEvidenceExtracting,
+    medicineRecognitionTimeout:
+        Duration = RemoteMedicineRecognitionService.defaultTimeout
+) throws -> some ApplicationProtocol {
     // Validate the bundled catalog at composition time. A missing or unsafe
     // resource prevents startup instead of silently serving an empty catalog.
     let medicineCatalog =
@@ -101,6 +142,30 @@ public func makeSlowWalkApplication(
         request,
         context in
         try await medicineController.assess(
+            request: request,
+            context: context
+        )
+    }
+
+    let medicineRecognitionService = RemoteMedicineRecognitionService(
+        extractor: medicinePackageEvidenceExtractor,
+        resolver: try RemoteMedicineCandidateResolver(
+            catalog: medicineCatalog
+        ),
+        timeout: medicineRecognitionTimeout
+    )
+    let medicineRecognitionController =
+        RemoteMedicineRecognitionController(
+            service: medicineRecognitionService,
+            dateProvider: dateProvider,
+            uuidProvider: uuidProvider
+        )
+    router.post(
+        RouterPath(SlowWalkAPI.Endpoint.medicineRecognize.path)
+    ) {
+        request,
+        context in
+        try await medicineRecognitionController.handle(
             request: request,
             context: context
         )
