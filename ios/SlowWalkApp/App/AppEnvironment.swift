@@ -50,7 +50,8 @@ final class AppEnvironment {
             medicineRecognizer: AppleVisionMedicineTextRecognizer(),
             medicineRequester: requester,
             medicineConfirmer: requester,
-            userHealthProfile: Self.productionDemoUserHealthProfile,
+            userHealthProfile:
+                BundledDemoUserProfile.profile.healthProfile,
             medicationRecords: []
         )
     }
@@ -135,25 +136,4 @@ final class AppEnvironment {
     ) -> AppEnvironment {
         AppEnvironment(clock: AppFixedClock(fixedDate: fixedDate))
     }
-
-    /// Current production demo composition. Values mirror
-    /// `shared/fixtures/profile-complete.json`; medication history mirrors
-    /// `shared/fixtures/medication-history-empty.json`.
-    private static let productionDemoUserHealthProfile = UserHealthProfile(
-        id: UUID(uuidString: "10000000-0000-0000-0000-000000000001")!,
-        age: 72,
-        allergies: ["synthetic-pollen"],
-        diagnosedConditions: ["synthetic-condition-a"],
-        currentMedicineIngredientIDs: ["synthetic-ingredient-b"],
-        bodyMetrics: BodyMetrics(
-            systolicBloodPressure: 120,
-            diastolicBloodPressure: 80,
-            heartRate: 70,
-            measuredAt: Date(timeIntervalSince1970: 1_753_314_900),
-            source: "demo_data",
-            deviceIdentifier: "synthetic-device-01"
-        ),
-        updatedAt: Date(timeIntervalSince1970: 1_753_314_900),
-        createdAt: Date(timeIntervalSince1970: 1_752_969_600)
-    )
 }
