@@ -195,13 +195,80 @@ final class ZhipuVisionClientTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(failure.callCount, 1)
     }
 
-    func testDefaultRetryDelayPropagatesCancellation() async {
+    func testDuplicateEntryWaiterIsRejectedWithoutReplacingOriginal() async {
+        let gate = TwoPhaseCancellationGate()
+        let registered = expectation(description: "entry waiter registered")
+        let original = Task {
+            try await gate.waitUntilEntered(onWaiterRegistered: registered.fulfill)
+        }
+        await fulfillment(of: [registered], timeout: 1)
+        let originalCounts = await gate.entryRegistrationCounts()
+        XCTAssertEqual(originalCounts.waiterInstallations, 1)
+        XCTAssertEqual(originalCounts.timeoutTaskInstallations, 1)
+
+        let duplicateResult = await Task { try await gate.waitUntilEntered() }.result
+        let countsAfterDuplicate = await gate.entryRegistrationCounts()
+
+        XCTAssertEqual(countsAfterDuplicate.waiterInstallations, 1)
+        XCTAssertEqual(countsAfterDuplicate.timeoutTaskInstallations, 1)
+        XCTAssertEqual(countsAfterDuplicate, originalCounts)
+        guard duplicateResult.failure as? TwoPhaseCancellationGate.GateError
+                == .duplicateWaiter else {
+            XCTFail("A duplicate entry waiter must fail with duplicateWaiter.")
+            await gate.release()
+            return
+        }
+
+        let arrival = Task { try await gate.arriveAndWaitForRelease() }
+        let originalResult = await original.result
+        await gate.release()
+        let arrivalResult = await arrival.result
+        XCTAssertNoThrow(try originalResult.get())
+        XCTAssertNoThrow(try arrivalResult.get())
+    }
+
+    func testDuplicateReleaseWaiterIsRejectedWithoutReplacingOriginal() async {
+        let gate = TwoPhaseCancellationGate()
+        let registered = expectation(description: "release waiter registered")
+        let original = Task {
+            try await gate.arriveAndWaitForRelease(
+                onWaiterRegistered: registered.fulfill
+            )
+        }
+        await fulfillment(of: [registered], timeout: 1)
+        let originalCounts = await gate.releaseRegistrationCounts()
+        XCTAssertEqual(originalCounts.waiterInstallations, 1)
+        XCTAssertEqual(originalCounts.timeoutTaskInstallations, 1)
+
+        let duplicateResult = await Task {
+            try await gate.arriveAndWaitForRelease()
+        }.result
+        let countsAfterDuplicate = await gate.releaseRegistrationCounts()
+
+        XCTAssertEqual(countsAfterDuplicate.waiterInstallations, 1)
+        XCTAssertEqual(countsAfterDuplicate.timeoutTaskInstallations, 1)
+        XCTAssertEqual(countsAfterDuplicate, originalCounts)
+        guard duplicateResult.failure as? TwoPhaseCancellationGate.GateError
+                == .duplicateWaiter else {
+            XCTFail("A duplicate release waiter must fail with duplicateWaiter.")
+            await gate.release()
+            return
+        }
+
+        await gate.release()
+        let originalResult = await original.result
+        XCTAssertNoThrow(try originalResult.get())
+    }
+
+    func testDefaultRetryDelayPropagatesCancellation() async throws {
+        let gate = TwoPhaseCancellationGate()
         let task = Task {
-            await Task.yield()
+            try await gate.arriveAndWaitForRelease()
             try await ZhipuVisionClient.defaultRetryDelay(1)
         }
+        try await gate.waitUntilEntered()
         task.cancel()
-
+        await gate.release()
         do {
             try await task.value
             XCTFail("A cancelled retry delay must throw CancellationError.")
@@ -213,6 +280,7 @@ final class ZhipuVisionClientTests: XCTestCase, @unchecked Sendable {
     }
 
     func testAlreadyCancelledTaskDoesNotStartTransportAttempt() async throws {
+        let gate = TwoPhaseCancellationGate()
         let transport = StubVisionTransport(steps: [
             .response(completion(content: modelContent(
                 visibleTexts: ["must not be requested"]
@@ -220,14 +288,15 @@ final class ZhipuVisionClientTests: XCTestCase, @unchecked Sendable {
         ])
         let client = try makeClient(transport: transport, maxAttempts: 3)
         let task = Task {
-            await Task.yield()
+            try await gate.arriveAndWaitForRelease()
             return try await client.extractVisibleTexts(from: VisionImagePayload(
                 data: imageData,
                 mimeType: "image/png"
             ))
         }
+        try await gate.waitUntilEntered()
         task.cancel()
-
+        await gate.release()
         do {
             _ = try await task.value
             XCTFail("A cancelled task must not start a transport attempt.")
@@ -241,7 +310,7 @@ final class ZhipuVisionClientTests: XCTestCase, @unchecked Sendable {
     }
 
     func testCancellationDuringRetryDelayStopsBeforeNextTransportAttempt() async throws {
-        let gate = CancellationReturningRetryDelayGate()
+        let gate = TwoPhaseCancellationGate()
         let transport = StubVisionTransport(steps: [
             .urlError(.networkConnectionLost),
             .response(completion(content: modelContent(
@@ -251,7 +320,7 @@ final class ZhipuVisionClientTests: XCTestCase, @unchecked Sendable {
         let client = try makeClient(
             transport: transport,
             maxAttempts: 3,
-            retryDelay: { _ in try await gate.wait() }
+            retryDelay: { _ in try await gate.arriveAndWaitForRelease() }
         )
         let task = Task {
             try await client.extractVisibleTexts(from: VisionImagePayload(
@@ -259,10 +328,9 @@ final class ZhipuVisionClientTests: XCTestCase, @unchecked Sendable {
                 mimeType: "image/png"
             ))
         }
-
-        await gate.waitUntilEntered()
+        try await gate.waitUntilEntered()
         task.cancel()
-
+        await gate.release()
         do {
             _ = try await task.value
             XCTFail("Cancellation must stop the retry loop.")
@@ -721,41 +789,105 @@ private actor StubVisionTransport: VisionHTTPTransport {
     func firstRequest() -> VisionTransportRequest? { requests.first }
 }
 
-private actor CancellationReturningRetryDelayGate {
-    private var delayContinuation: CheckedContinuation<Void, Never>?
+private actor TwoPhaseCancellationGate {
+    enum GateError: Error, Equatable { case duplicateWaiter, entryTimedOut, releaseTimedOut }
+
+    struct RegistrationCounts: Equatable {
+        let waiterInstallations: Int
+        let timeoutTaskInstallations: Int
+    }
+
+    private enum Phase: Hashable {
+        case entry, release
+
+        var timeoutError: GateError {
+            self == .entry ? .entryTimedOut : .releaseTimedOut
+        }
+    }
+
+    private let timeout: Duration
     private var entered = false
-    private var enteredWaiters: [CheckedContinuation<Void, Never>] = []
-    private var cancellationRequested = false
+    private var released = false
+    private var waiters: [Phase: CheckedContinuation<Void, Error>] = [:]
+    private var timeoutTasks: [Phase: Task<Void, Never>] = [:]
+    private var waiterInstallations: [Phase: Int] = [:]
+    private var timeoutTaskInstallations: [Phase: Int] = [:]
 
-    func wait() async throws {
+    init(timeout: Duration = .seconds(2)) {
+        self.timeout = timeout
+    }
+
+    func arriveAndWaitForRelease(onWaiterRegistered: (@Sendable () -> Void)? = nil) async throws {
         entered = true
-        enteredWaiters.forEach { $0.resume() }
-        enteredWaiters.removeAll()
-
-        await withTaskCancellationHandler {
-            await withCheckedContinuation { continuation in
-                if cancellationRequested || Task.isCancelled {
-                    continuation.resume()
-                } else {
-                    delayContinuation = continuation
-                }
-            }
-        } onCancel: {
-            Task { await self.returnFromDelay() }
-        }
+        resume(.entry)
+        guard !released else { return }
+        try await wait(for: .release, onWaiterRegistered: onWaiterRegistered)
     }
 
-    func waitUntilEntered() async {
+    func waitUntilEntered(onWaiterRegistered: (@Sendable () -> Void)? = nil) async throws {
         guard !entered else { return }
-        await withCheckedContinuation { continuation in
-            enteredWaiters.append(continuation)
+        try await withTaskCancellationHandler {
+            try await wait(for: .entry, onWaiterRegistered: onWaiterRegistered)
+        } onCancel: {
+            Task { await self.resume(.entry, throwing: CancellationError()) }
         }
     }
 
-    private func returnFromDelay() {
-        cancellationRequested = true
-        delayContinuation?.resume()
-        delayContinuation = nil
+    func release() {
+        released = true
+        resume(.release)
+    }
+
+    func entryRegistrationCounts() -> RegistrationCounts {
+        registrationCounts(for: .entry)
+    }
+
+    func releaseRegistrationCounts() -> RegistrationCounts {
+        registrationCounts(for: .release)
+    }
+
+    private func wait(
+        for phase: Phase,
+        onWaiterRegistered: (@Sendable () -> Void)?
+    ) async throws {
+        try await withCheckedThrowingContinuation {
+            (continuation: CheckedContinuation<Void, Error>) in
+            if Task.isCancelled && phase == .entry {
+                continuation.resume(throwing: CancellationError())
+                return
+            }
+            guard waiters[phase] == nil, timeoutTasks[phase] == nil else {
+                continuation.resume(throwing: GateError.duplicateWaiter)
+                return
+            }
+            waiterInstallations[phase, default: 0] += 1
+            waiters[phase] = continuation
+            timeoutTaskInstallations[phase, default: 0] += 1
+            timeoutTasks[phase] = Task { [weak self, timeout] in
+                do { try await Task.sleep(for: timeout) } catch { return }
+                await self?.resume(phase, throwing: phase.timeoutError)
+            }
+            onWaiterRegistered?()
+        }
+    }
+
+    private func registrationCounts(for phase: Phase) -> RegistrationCounts {
+        RegistrationCounts(
+            waiterInstallations: waiterInstallations[phase, default: 0],
+            timeoutTaskInstallations: timeoutTaskInstallations[phase, default: 0]
+        )
+    }
+
+    private func resume(_ phase: Phase, throwing error: (any Error)? = nil) {
+        timeoutTasks.removeValue(forKey: phase)?.cancel()
+        guard let continuation = waiters.removeValue(forKey: phase) else {
+            return
+        }
+        if let error {
+            continuation.resume(throwing: error)
+        } else {
+            continuation.resume()
+        }
     }
 }
 
