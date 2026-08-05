@@ -1,4 +1,9 @@
 import Foundation
+
+#if canImport(FoundationNetworking)
+import FoundationNetworking
+#endif
+
 @testable import SlowWalkServer
 import XCTest
 
@@ -27,6 +32,29 @@ final class ZhipuVisionClientTests: XCTestCase, @unchecked Sendable {
         )
         let requestBody = String(decoding: request.body, as: UTF8.self)
         XCTAssertTrue(requestBody.contains(imageData.base64EncodedString()))
+    }
+
+    func testClientUsesPrimaryModelWithoutExecutingFallback() async throws {
+        let execution = try await run(
+            [.response(completion(content: modelContent(
+                visibleTexts: ["LOT 42", "2028-01"]
+            )))],
+            primaryModel: "primary-vision-model",
+            fallbackModel: "fallback-must-not-be-sent"
+        )
+
+        XCTAssertEqual(execution.result, .success(.fixture))
+        let capturedRequest = await execution.transport.firstRequest()
+        let request = try XCTUnwrap(capturedRequest)
+        let body = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: request.body)
+                as? [String: Any]
+        )
+        XCTAssertEqual(body["model"] as? String, "primary-vision-model")
+        XCTAssertFalse(
+            String(decoding: request.body, as: UTF8.self)
+                .contains("fallback-must-not-be-sent")
+        )
     }
 
     func testMissingOrEmptyChoicesAndContentAreMalformedProviderResponses() async throws {
@@ -167,22 +195,185 @@ final class ZhipuVisionClientTests: XCTestCase, @unchecked Sendable {
         XCTAssertEqual(failure.callCount, 1)
     }
 
-    func testNonRetryableHTTPErrorCallsTransportOnce() async throws {
-        let execution = try await run(
-            [.response(status(401)), .response(status(200))],
-            maxAttempts: 3
+    func testDefaultRetryDelayPropagatesCancellation() async {
+        let task = Task {
+            await Task.yield()
+            try await ZhipuVisionClient.defaultRetryDelay(1)
+        }
+        task.cancel()
+
+        do {
+            try await task.value
+            XCTFail("A cancelled retry delay must throw CancellationError.")
+        } catch is CancellationError {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected cancellation error: \(error)")
+        }
+    }
+
+    func testAlreadyCancelledTaskDoesNotStartTransportAttempt() async throws {
+        let transport = StubVisionTransport(steps: [
+            .response(completion(content: modelContent(
+                visibleTexts: ["must not be requested"]
+            ))),
+        ])
+        let client = try makeClient(transport: transport, maxAttempts: 3)
+        let task = Task {
+            await Task.yield()
+            return try await client.extractVisibleTexts(from: VisionImagePayload(
+                data: imageData,
+                mimeType: "image/png"
+            ))
+        }
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("A cancelled task must not start a transport attempt.")
+        } catch is CancellationError {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected cancellation error: \(error)")
+        }
+        let callCount = await transport.callCount()
+        XCTAssertEqual(callCount, 0)
+    }
+
+    func testCancellationDuringRetryDelayStopsBeforeNextTransportAttempt() async throws {
+        let gate = CancellationReturningRetryDelayGate()
+        let transport = StubVisionTransport(steps: [
+            .urlError(.networkConnectionLost),
+            .response(completion(content: modelContent(
+                visibleTexts: ["must not be requested"]
+            ))),
+        ])
+        let client = try makeClient(
+            transport: transport,
+            maxAttempts: 3,
+            retryDelay: { _ in try await gate.wait() }
         )
+        let task = Task {
+            try await client.extractVisibleTexts(from: VisionImagePayload(
+                data: imageData,
+                mimeType: "image/png"
+            ))
+        }
+
+        await gate.waitUntilEntered()
+        task.cancel()
+
+        do {
+            _ = try await task.value
+            XCTFail("Cancellation must stop the retry loop.")
+        } catch is CancellationError {
+            // Expected.
+        } catch let error as ZhipuVisionClientError {
+            XCTFail("Cancellation was mapped to client error: \(error)")
+        } catch {
+            XCTFail("Unexpected cancellation error: \(error)")
+        }
+        let callCount = await transport.callCount()
+        XCTAssertEqual(callCount, 1)
+    }
+
+    func testTransportCancellationErrorIsPropagatedWithoutRetry() async throws {
+        let transport = StubVisionTransport(steps: [
+            .cancellation,
+            .response(status(200)),
+        ])
+        let client = try makeClient(transport: transport, maxAttempts: 3)
+
+        do {
+            _ = try await client.extractVisibleTexts(from: VisionImagePayload(
+                data: imageData,
+                mimeType: "image/png"
+            ))
+            XCTFail("Transport cancellation must be propagated.")
+        } catch is CancellationError {
+            // Expected.
+        } catch let error as ZhipuVisionClientError {
+            XCTFail("Cancellation was mapped to client error: \(error)")
+        } catch {
+            XCTFail("Unexpected cancellation error: \(error)")
+        }
+        let callCount = await transport.callCount()
+        XCTAssertEqual(callCount, 1)
+    }
+
+    func testCancelledURLErrorIsCancellationWithoutRetry() async throws {
+        let transport = StubVisionTransport(steps: [
+            .urlError(.cancelled),
+            .response(status(200)),
+        ])
+        let client = try makeClient(transport: transport, maxAttempts: 3)
+
+        do {
+            _ = try await client.extractVisibleTexts(from: VisionImagePayload(
+                data: imageData,
+                mimeType: "image/png"
+            ))
+            XCTFail("URLError.cancelled must stop the retry loop.")
+        } catch is CancellationError {
+            // Expected.
+        } catch let error as ZhipuVisionClientError {
+            XCTFail("Cancellation was mapped to client error: \(error)")
+        } catch {
+            XCTFail("Unexpected cancellation error: \(error)")
+        }
+        let callCount = await transport.callCount()
+        XCTAssertEqual(callCount, 1)
+    }
+
+    func testNonRetryableHTTP4xxErrorsCallTransportOnce() async throws {
+        let cases: [(Int, ZhipuVisionClientError)] = [
+            (400, .invalidRequest(
+                providerIdentifier: "zhipu", statusCode: 400
+            )),
+            (401, .unauthorized(
+                providerIdentifier: "zhipu", statusCode: 401
+            )),
+            (403, .unauthorized(
+                providerIdentifier: "zhipu", statusCode: 403
+            )),
+            (404, .invalidRequest(
+                providerIdentifier: "zhipu", statusCode: 404
+            )),
+        ]
+        for (statusCode, expectedError) in cases {
+            let execution = try await run(
+                [.response(status(statusCode)), .response(status(200))],
+                maxAttempts: 3
+            )
+            XCTAssertEqual(execution.result, .failure(expectedError))
+            XCTAssertEqual(execution.callCount, 1, "HTTP \(statusCode)")
+        }
+    }
+
+    func test429ReturnsRateLimitedWithoutRetry() async throws {
+        let execution = try await run([
+            .response(status(429)),
+            .response(completion(content: modelContent(
+                visibleTexts: ["must not be requested"]
+            ))),
+        ], maxAttempts: 3)
+
         XCTAssertEqual(
             execution.result,
-            .failure(.unauthorized(
-                providerIdentifier: "zhipu", statusCode: 401
+            .failure(.rateLimited(
+                providerIdentifier: "zhipu", statusCode: 429
             ))
         )
         XCTAssertEqual(execution.callCount, 1)
+        XCTAssertFalse(
+            execution.result.failure?.description.contains(
+                "provider error body must not escape"
+            ) ?? true
+        )
     }
 
-    func test429AndAllowed5xxStatusesRetry() async throws {
-        for retryableStatus in [429, 500, 502, 503, 504] {
+    func testAllowed5xxStatusesRetry() async throws {
+        for retryableStatus in [500, 502, 503, 504] {
             let execution = try await run([
                 .response(status(retryableStatus)),
                 .response(completion(content: modelContent(
@@ -197,6 +388,17 @@ final class ZhipuVisionClientTests: XCTestCase, @unchecked Sendable {
     func testTemporaryNetworkFailureRetries() async throws {
         let execution = try await run([
             .urlError(.networkConnectionLost),
+            .response(completion(content: modelContent(
+                visibleTexts: ["LOT 42", "2028-01"]
+            ))),
+        ], maxAttempts: 2)
+        XCTAssertEqual(execution.result, .success(.fixture))
+        XCTAssertEqual(execution.callCount, 2)
+    }
+
+    func testTimeoutRetriesUnderExistingPolicy() async throws {
+        let execution = try await run([
+            .urlError(.timedOut),
             .response(completion(content: modelContent(
                 visibleTexts: ["LOT 42", "2028-01"]
             ))),
@@ -282,29 +484,60 @@ final class ZhipuVisionClientTests: XCTestCase, @unchecked Sendable {
         }
     }
 
+    func testRedirectDelegateRejectsSameOriginRedirect() {
+        assertRedirectRejected(
+            targetURL: URL(string: "https://vision.example.com/v4/redirected")!
+        )
+    }
+
+    func testRedirectDelegateRejectsCrossOriginRedirect() {
+        assertRedirectRejected(
+            targetURL: URL(string: "https://redirect.example.net/collect")!
+        )
+    }
+
+    func testRedirectPolicyRenderingDoesNotLeakHeadersOrBody() {
+        let headerCanary = "redirect-AUTHORIZATION-LEAK-CANARY"
+        let bodyCanary = "redirect-IMAGE-BODY-LEAK-CANARY"
+        var proposedRequest = URLRequest(
+            url: URL(string: "https://redirect.example.net/collect")!
+        )
+        proposedRequest.setValue(
+            "Bearer \(headerCanary)",
+            forHTTPHeaderField: "Authorization"
+        )
+        proposedRequest.httpBody = Data(bodyCanary.utf8)
+        let delegate = VisionHTTPRedirectDelegate()
+
+        XCTAssertNil(delegate.redirectRequest(for: proposedRequest))
+        var dumped = String()
+        dump(delegate, to: &dumped)
+        for rendering in [
+            delegate.description,
+            delegate.debugDescription,
+            String(reflecting: delegate),
+            dumped,
+            String(describing: VisionHTTPTransportError.nonHTTPResponse),
+        ] {
+            XCTAssertFalse(rendering.contains(headerCanary), rendering)
+            XCTAssertFalse(rendering.contains(bodyCanary), rendering)
+            XCTAssertFalse(rendering.lowercased().contains("bearer"), rendering)
+        }
+    }
+
     private func run(
         _ steps: [StubVisionTransport.Step],
         image: VisionImagePayload? = nil,
-        maxAttempts: Int = 1
+        maxAttempts: Int = 1,
+        primaryModel: String = "vision-model",
+        fallbackModel: String = "vision-model"
     ) async throws -> Execution {
-        let configuration = try VisionProviderConfiguration(
-            providerIdentifier: "zhipu",
-            baseURL: URL(string: "https://vision.example.com/v4")!,
-            model: "vision-model",
-            requestTimeout: 1,
-            maxImageBytes: 4_096,
-            maxAttempts: maxAttempts
-        )
-        let runtime = ZhipuVisionRuntimeConfiguration(
-            primary: configuration,
-            fallback: configuration,
-            credential: VisionCredential(apiKey: secret)
-        )
         let transport = StubVisionTransport(steps: steps)
-        let client = ZhipuVisionClient(
-            runtimeConfiguration: runtime,
+        let client = try makeClient(
             transport: transport,
-            retryDelay: { _ in }
+            maxAttempts: maxAttempts,
+            primaryModel: primaryModel,
+            fallbackModel: fallbackModel
         )
         let result: Result<VisionVisibleTextResult, ZhipuVisionClientError>
         do {
@@ -322,6 +555,80 @@ final class ZhipuVisionClientTests: XCTestCase, @unchecked Sendable {
             callCount: await transport.callCount(),
             client: client,
             transport: transport
+        )
+    }
+
+    private func makeClient(
+        transport: any VisionHTTPTransport,
+        maxAttempts: Int,
+        primaryModel: String = "vision-model",
+        fallbackModel: String = "vision-model",
+        retryDelay: @escaping ZhipuVisionClient.RetryDelay = { _ in }
+    ) throws -> ZhipuVisionClient {
+        let primary = try VisionProviderConfiguration(
+            providerIdentifier: "zhipu",
+            baseURL: URL(string: "https://vision.example.com/v4")!,
+            model: primaryModel,
+            requestTimeout: 1,
+            maxImageBytes: 4_096,
+            maxAttempts: maxAttempts
+        )
+        let fallback = try VisionProviderConfiguration(
+            providerIdentifier: "zhipu",
+            baseURL: URL(string: "https://vision.example.com/v4")!,
+            model: fallbackModel,
+            requestTimeout: 1,
+            maxImageBytes: 4_096,
+            maxAttempts: maxAttempts
+        )
+        let runtime = ZhipuVisionRuntimeConfiguration(
+            primary: primary,
+            fallback: fallback,
+            credential: VisionCredential(apiKey: secret)
+        )
+        return ZhipuVisionClient(
+            runtimeConfiguration: runtime,
+            transport: transport,
+            retryDelay: retryDelay
+        )
+    }
+
+    private func assertRedirectRejected(targetURL: URL) {
+        let originalURL = URL(string: "https://vision.example.com/v4/original")!
+        var proposedRequest = URLRequest(url: targetURL)
+        proposedRequest.setValue(
+            "Bearer redirect-secret",
+            forHTTPHeaderField: "Authorization"
+        )
+        proposedRequest.httpBody = imageData
+
+        let delegate = VisionHTTPRedirectDelegate()
+        let completion = RedirectCompletionBox()
+        let response = HTTPURLResponse(
+            url: originalURL,
+            statusCode: 302,
+            httpVersion: nil,
+            headerFields: ["Location": targetURL.absoluteString]
+        )!
+        let task = URLSession.shared.dataTask(with: originalURL)
+        delegate.urlSession(
+            .shared,
+            task: task,
+            willPerformHTTPRedirection: response,
+            newRequest: proposedRequest
+        ) { redirectedRequest in
+            completion.store(redirectedRequest)
+        }
+
+        switch completion.result() {
+        case .notCalled:
+            XCTFail("Redirect completion was not called.")
+        case .called(let redirectedRequest):
+            XCTAssertNil(redirectedRequest, targetURL.absoluteString)
+        }
+        XCTAssertNil(
+            delegate.redirectRequest(for: proposedRequest),
+            "Redirect policy must reject the proposed request."
         )
     }
 
@@ -386,6 +693,7 @@ private actor StubVisionTransport: VisionHTTPTransport {
     enum Step: Sendable {
         case response(VisionHTTPResponse)
         case urlError(URLError.Code)
+        case cancellation
         case failure
     }
 
@@ -404,10 +712,71 @@ private actor StubVisionTransport: VisionHTTPTransport {
         switch steps.removeFirst() {
         case .response(let response): return response
         case .urlError(let code): throw URLError(code)
+        case .cancellation: throw CancellationError()
         case .failure: throw StubError.transportFailure
         }
     }
 
     func callCount() -> Int { requests.count }
     func firstRequest() -> VisionTransportRequest? { requests.first }
+}
+
+private actor CancellationReturningRetryDelayGate {
+    private var delayContinuation: CheckedContinuation<Void, Never>?
+    private var entered = false
+    private var enteredWaiters: [CheckedContinuation<Void, Never>] = []
+    private var cancellationRequested = false
+
+    func wait() async throws {
+        entered = true
+        enteredWaiters.forEach { $0.resume() }
+        enteredWaiters.removeAll()
+
+        await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                if cancellationRequested || Task.isCancelled {
+                    continuation.resume()
+                } else {
+                    delayContinuation = continuation
+                }
+            }
+        } onCancel: {
+            Task { await self.returnFromDelay() }
+        }
+    }
+
+    func waitUntilEntered() async {
+        guard !entered else { return }
+        await withCheckedContinuation { continuation in
+            enteredWaiters.append(continuation)
+        }
+    }
+
+    private func returnFromDelay() {
+        cancellationRequested = true
+        delayContinuation?.resume()
+        delayContinuation = nil
+    }
+}
+
+private final class RedirectCompletionBox: @unchecked Sendable {
+    enum Result {
+        case notCalled
+        case called(URLRequest?)
+    }
+
+    private let lock = NSLock()
+    private var storedResult = Result.notCalled
+
+    func store(_ request: URLRequest?) {
+        lock.lock()
+        storedResult = .called(request)
+        lock.unlock()
+    }
+
+    func result() -> Result {
+        lock.lock()
+        defer { lock.unlock() }
+        return storedResult
+    }
 }

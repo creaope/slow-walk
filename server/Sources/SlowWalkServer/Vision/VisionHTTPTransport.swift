@@ -18,6 +18,25 @@ protocol VisionHTTPTransport: Sendable {
 
 enum VisionHTTPTransportError: Error, Sendable { case nonHTTPResponse }
 
+/// Rejects every redirect so credentials and image data stay on the original request.
+final class VisionHTTPRedirectDelegate: NSObject, URLSessionTaskDelegate, @unchecked Sendable {
+    override var description: String {
+        "VisionHTTPRedirectDelegate(policy: rejectAll)"
+    }
+
+    func redirectRequest(for _: URLRequest) -> URLRequest? { nil }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest,
+        completionHandler: @escaping @Sendable (URLRequest?) -> Void
+    ) {
+        completionHandler(redirectRequest(for: request))
+    }
+}
+
 /// URLSession-backed transport shared by macOS and Linux server builds.
 struct URLSessionVisionHTTPTransport: VisionHTTPTransport {
     private let session: URLSession
@@ -36,7 +55,10 @@ struct URLSessionVisionHTTPTransport: VisionHTTPTransport {
             urlRequest.setValue(value, forHTTPHeaderField: name)
         }
 
-        let (body, response) = try await session.data(for: urlRequest)
+        let (body, response) = try await session.data(
+            for: urlRequest,
+            delegate: VisionHTTPRedirectDelegate()
+        )
         guard let httpResponse = response as? HTTPURLResponse else {
             throw VisionHTTPTransportError.nonHTTPResponse
         }

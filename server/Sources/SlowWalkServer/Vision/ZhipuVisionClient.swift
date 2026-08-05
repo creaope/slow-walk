@@ -191,7 +191,7 @@ struct ZhipuVisionClient:
     CustomDebugStringConvertible,
     CustomReflectable
 {
-    typealias RetryDelay = @Sendable (_ retryNumber: Int) async -> Void
+    typealias RetryDelay = @Sendable (_ retryNumber: Int) async throws -> Void
 
     private static let maximumProviderResponseBytes = 1_048_576
     private static let maximumModelContentBytes = 32_768
@@ -253,17 +253,26 @@ struct ZhipuVisionClient:
         }
 
         for attempt in 1 ... configuration.maxAttempts {
+            try Task.checkCancellation()
+
             let response: VisionHTTPResponse
             do {
                 response = try await transport.send(request)
+                try Task.checkCancellation()
+            } catch let cancellation as CancellationError {
+                throw cancellation
+            } catch let urlError as URLError where urlError.code == .cancelled {
+                throw CancellationError()
             } catch {
+                try Task.checkCancellation()
                 let (mappedError, retryable) = mapTransportError(
                     error, providerIdentifier: provider
                 )
                 guard retryable, attempt < configuration.maxAttempts else {
                     throw mappedError
                 }
-                await retryDelay(attempt)
+                try await retryDelay(attempt)
+                try Task.checkCancellation()
                 continue
             }
 
@@ -276,7 +285,8 @@ struct ZhipuVisionClient:
                 else {
                     throw mappedError
                 }
-                await retryDelay(attempt)
+                try await retryDelay(attempt)
+                try Task.checkCancellation()
                 continue
             }
             return try parse(response, providerIdentifier: provider)
@@ -390,11 +400,11 @@ struct ZhipuVisionClient:
     }
 
     private static func isRetryable(statusCode: Int) -> Bool {
-        statusCode == 429 || [500, 502, 503, 504].contains(statusCode)
+        [500, 502, 503, 504].contains(statusCode)
     }
 
-    private static func defaultRetryDelay(_ retryNumber: Int) async {
-        try? await Task<Never, Never>.sleep(
+    static func defaultRetryDelay(_ retryNumber: Int) async throws {
+        try await Task<Never, Never>.sleep(
             nanoseconds: UInt64(retryNumber) * 50_000_000
         )
     }

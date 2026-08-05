@@ -46,8 +46,8 @@ enum ZhipuVisionRuntimeConfigurationError:
 /// the macOS Keychain.
 ///
 /// Provider details remain in ``VisionProviderConfiguration`` and the key
-/// remains in ``VisionCredential``. This type only groups the existing values
-/// needed to build primary and fallback transport requests.
+/// remains in ``VisionCredential``. The current client sends only `primary`;
+/// `fallback` is retained for future orchestration and is not selected here.
 struct ZhipuVisionRuntimeConfiguration:
     Sendable,
     CustomStringConvertible,
@@ -72,6 +72,7 @@ struct ZhipuVisionRuntimeConfiguration:
     static let keychainAccount = apiKeyEnvironmentKey
 
     let primary: VisionProviderConfiguration
+    /// Reserved configuration only; PR #53 does not execute model fallback.
     let fallback: VisionProviderConfiguration
     let credential: VisionCredential
 
