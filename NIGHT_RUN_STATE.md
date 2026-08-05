@@ -5,7 +5,7 @@
 - Fixed baseline SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894`
 - Branch: `feature/zhipu-online-medicine-mainline`
 - Start time: `2026-08-05 23:55:56 CST (+0800)`
-- Current phase: `Phase 3 - iOS remote adapter`
+- Current phase: `Phase 4 - remote-first composition`
 - Overall status: `IN_PROGRESS`
 - Initial `origin/develop` SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894` (verified against remote with `git ls-remote`)
 - Final `origin/develop` SHA: `PENDING`
@@ -20,9 +20,9 @@
 | 0 - Preflight | PASSED_WITH_LIMITATION | `775de0f2ec82ee1e1779f94c021011639ae29593` | `23032be22ef00ca8ffa0e4721bbfe5396f6d8040` | `checkpoint/zhipu-night-0-preflight` | Branch/baseline/remote/architecture/CI/assets audit passed; archive gates passed |
 | 2A - Structured package evidence | PASSED | `cdf1c11ea450328144c4515c8ea5f403e2eb6200` | `1a33db77b7682290fc698de4263a26e7b561cf2c` | `checkpoint/zhipu-night-2a-evidence` | Full Server suite: 171 passed, 1 live smoke skipped, 0 failed |
 | 2B - Controlled retrieval and verification | PASSED | `e35eaa58116500cc212ba9797f61e6720fe8ae82` | `9a0d2d0bb9770aa373c6ffe1b1e5eeb40880f80a` | `checkpoint/zhipu-night-2b-resolution` | Focused 22/22 and full Server 193 passed; 1 live smoke skipped; 0 failed |
-| 2C - Server recognition API | PASSED | `758b6bdc8027d16b19b6baa52390de8377774ad9` | PENDING | `checkpoint/zhipu-night-2c-server-api` | Core 365/365 and Server 209/209 passed; 1 live smoke skipped |
-| 3 - iOS remote adapter | IN_PROGRESS | PENDING | PENDING | PENDING | Read-only implementation audit passed; code/tests not started |
-| 4 - Remote-first composition | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
+| 2C - Server recognition API | PASSED | `758b6bdc8027d16b19b6baa52390de8377774ad9` | `90123f98d4e6877147b396e9c2e4c6e078a5fe61` | `checkpoint/zhipu-night-2c-server-api` | Core 365/365 and Server 209/209 passed; 1 live smoke skipped |
+| 3 - iOS remote adapter | PASSED | PENDING | PENDING | PENDING | Core 392/392, Server 211/211, and iOS Simulator 29/29 passed; 1 credential-gated live test skipped |
+| 4 - Remote-first composition | IN_PROGRESS | PENDING | PENDING | PENDING | Read-only composition audit passed; implementation not started |
 | 5 - Full regression and smoke | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 
 ## Preflight Findings And Plan
@@ -166,6 +166,19 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Phase 2C prohibited-file review: `PASSED` (no CI, signing, entitlement, project, Onboarding, Profile, risk-rule, or ActionCard mapping file modified)
 - Phase 2C secret-pattern review: `PASSED` (no credential-like added value found)
 - Phase 2C architecture/security review: `PASSED_WITH_LIMITATION` (`P0=0`, `P1=0`, three non-blocking `P2` limitations recorded below)
+- Phase 3 read-only client/image/transport audit: `PASSED` (dedicated health-free boundary required; no manifest, project, dependency, composition, risk, or presentation change required)
+- Phase 3 Core response-mapper tests: `PASSED` (27/27 focused; 392/392 full Core, independently re-run)
+- Phase 3 Server projection compatibility tests: `PASSED` (2/2 focused; 211/211 full Server, 1 live network test skipped by explicit opt-in gate)
+- Phase 3 iOS image preparation tests: `PASSED` (9/9 focused Simulator tests)
+- Phase 3 iOS URLSession requester tests: `PASSED` (20/20 focused Simulator tests)
+- Phase 3 final independent iOS Simulator run: `PASSED` (29/29 across image preparation and URLSession requester on workflow-selected iPhone Air, iOS 26.5; `** TEST SUCCEEDED **`)
+- Phase 3 final architecture/security review: `PASSED_WITH_LIMITATION` (`P0=0`, `P1=0`, three non-blocking `P2` items recorded below)
+- Phase 3 post-state archive test gate: `PASSED` (Core mapper 27/27, Server projection 2/2, iOS Simulator 29/29)
+- Phase 3 `git diff --check`: `PASSED`
+- Phase 3 changed-file/stat review: `PASSED` (10 files; staged snapshot before these result lines was `+4710/-13`)
+- Phase 3 prohibited-file review: `PASSED` (no CI, signing, entitlement, project, Onboarding, Profile, risk-rule, ActionCard mapping, or Presentation file modified)
+- Phase 3 secret-pattern review: `PASSED` (no credential value found; the sole broad-pattern hit was the defensive `baseURL.password == nil` check)
+- Phase 3 canonical-implementation review: `PASSED` (one existing MedicineResolver, MedicinePipeline, MedicationRiskEngine, and ActionCardFactory implementation remains)
 
 ## Phase Change Records
 
@@ -220,6 +233,36 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Implementation commit: `758b6bdc8027d16b19b6baa52390de8377774ad9` (pushed)
 - Annotated checkpoint: `checkpoint/zhipu-night-2c-server-api` (pushed and verified to dereference to the implementation commit)
 
+### Phase 3 Audit
+
+- Planned Core additions: health-free online recognition request/result/failure protocol and strict Server-response mapper.
+- Planned iOS additions: bounded orientation-normalizing JPEG preparer and URLSession requester with redirect rejection and a 1 MiB response ceiling.
+- Phase boundary: `AppEnvironment`, capture ownership, online/local composition, canonical conflict handling, and visible fallback source remain Phase 4 work.
+- Existing stale/duplicate ownership: `MedicineCaptureViewModel` already owns one processing task, generation checks, cancellation barriers, and late-result suppression; Phase 3 remains a stateless adapter.
+- Package/project changes required: `NONE` (SwiftPM and Xcode synchronized groups auto-discover sources/tests).
+- Third-party dependencies required: `NONE`.
+
+### Phase 3 Implementation
+
+- Added: `swift-packages/SlowWalkCore/Sources/SlowWalkClientCore/OnlineMedicineRecognitionContracts.swift`
+- Added: `swift-packages/SlowWalkCore/Sources/SlowWalkClientCore/OnlineMedicineRecognitionResponseMapper.swift`
+- Added: `swift-packages/SlowWalkCore/Tests/SlowWalkClientCoreTests/OnlineMedicineRecognitionResponseMapperTests.swift`
+- Added: `ios/SlowWalkApp/Services/MedicineRecognition/MedicineRecognitionImagePreparer.swift`
+- Added: `ios/SlowWalkApp/Services/MedicineRecognition/URLSessionOnlineMedicineRecognitionRequester.swift`
+- Added: `ios/SlowWalkAppTests/MedicineRecognition/MedicineRecognitionImagePreparerTests.swift`
+- Added: `ios/SlowWalkAppTests/MedicineRecognition/URLSessionOnlineMedicineRecognitionRequesterTests.swift`
+- Modified: `server/Sources/SlowWalkServer/MedicineRecognition/RemoteMedicineRecognitionController.swift`
+- Modified: `server/Tests/SlowWalkServerTests/MedicineRecognition/RemoteMedicineRecognitionServerTests.swift`
+- Business/test lines before final state updates: `+4665/-8`.
+- Core request boundary contains image and correlation ID only; health/profile/history values cannot be represented.
+- iOS transport normalizes to bounded JPEG, uses an ephemeral URLSession, rejects redirects, requires HTTPS except loopback development URLs, caps streamed responses at 1 MiB, and never retries.
+- Stable transport/semantic errors remain distinct; cancellation propagates as `CancellationError`.
+- Resolved review finding: recognized responses cannot promote empty, conflicting, ordinary-alias-only, malformed, or out-of-bound evidence into the canonical pipeline.
+- Resolved review finding: HTTP success/provider status pairs, content type, request ID, API version, response URL, redirects, cancellation races, and declared/streamed response sizes are strictly validated.
+- Resolved review finding: Server bounded summaries always retain the selected canonical candidate and the alias plus independent packaging/manufacturer witnesses needed to validate corroborated recognition.
+- Package manifest and Xcode project changes: `NONE`.
+- Final review findings: `P0=0, P1=0, P2=3`.
+
 ## Known Issues
 
 - Real provider behavior cannot be verified in this run because no API key is available; Fake Client coverage remains required.
@@ -228,6 +271,9 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - P2: the Server validates declared MIME and size but does not inspect image magic bytes; bytes are only forwarded through the bounded Provider request and never executed or decoded on the Server.
 - P2: 2C has no explicit RiskEngine zero-call spy; its recognition controller/service dependency graph contains no RiskEngine or assessment dependency, and strict request decoding rejects health fields.
 - P2: a deliberately cancellation-ignoring extractor task can remain alive briefly after the API timeout; the API returns without waiting, late output cannot be published, and the production URLSession transport cooperates with cancellation.
+- P2: the strict iOS response mapper mirrors Server evidence-assurance rules for protocol validation; future rule changes require shared contract fixtures or an explicit stable assurance witness to prevent drift.
+- P2: stale-result suppression, duplicate submission, and one-active-task behavior remain intentionally owned by the Phase 4 composition layer; the Phase 3 requester is stateless and only proves independent request correlation.
+- P2: the Server's over-limit candidate/witness projection is covered at helper level; a controller-to-DTO-to-iOS-mapper extreme integration fixture remains a Phase 4/5 hardening opportunity.
 
 ## Blockers
 
@@ -235,7 +281,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 
 ## Next Action
 
-- Add the dedicated health-free online recognition client boundary, strict response mapper, bounded iOS image preparation, and URLSession adapter with mocked transport tests; do not modify composition, RiskEngine, or Presentation until Phase 4.
+- Run Phase 3 archive gates and checkpoint protocol, then implement the audited remote-first composition without changing medical risk rules or ActionCard semantics.
 
 ## Safety Record
 

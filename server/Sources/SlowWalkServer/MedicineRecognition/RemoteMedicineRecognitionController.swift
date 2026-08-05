@@ -228,19 +228,22 @@ struct RemoteMedicineRecognitionController: Sendable {
             }
         }
 
+        let canonicalResolution = canonicalResolutionDTO(
+            candidateResolution
+        )
+        let responseCandidates = Self.boundedCandidates(
+            candidateResolution.searchResult.candidates,
+            selectedMedicineID: canonicalResolution?.canonicalMedicineID
+        )
+
         return MedicineRecognitionAPIResponseDTO(
             status: status,
             requestID: requestID,
             packageEvidence: packageEvidenceDTO(
                 result.packageEvidence
             ),
-            canonicalResolution: canonicalResolutionDTO(
-                candidateResolution
-            ),
-            candidates: Array(
-                candidateResolution.searchResult.candidates
-                    .prefix(Self.maximumCandidateCount)
-            ).map(candidateDTO),
+            canonicalResolution: canonicalResolution,
+            candidates: responseCandidates.map(candidateDTO),
             unresolvedEvidence: Array(
                 candidateResolution.searchResult.unresolvedEvidence
                     .prefix(Self.maximumUnresolvedObservationCount)
@@ -379,7 +382,9 @@ struct RemoteMedicineRecognitionController: Sendable {
             canonicalName: candidate.medicine.canonicalName,
             exactEvidence: boundedMatches(candidate.exactEvidence),
             supportingEvidence: boundedMatches(
-                candidate.supportingEvidence
+                Self.boundedSupportingMatches(
+                    candidate.supportingEvidence
+                )
             ),
             conflictingEvidence: boundedMatches(
                 candidate.conflictingEvidence
@@ -406,6 +411,56 @@ struct RemoteMedicineRecognitionController: Sendable {
                 catalogText: $0.catalogText
             )
         }
+    }
+
+    /// A corroborated resolution needs both witnesses to remain inspectable
+    /// after the response-size projection. The source list is already stable;
+    /// only over-limit lists are reordered, and only when both witnesses exist.
+    static func boundedSupportingMatches(
+        _ matches: [MedicineEvidenceMatch]
+    ) -> [MedicineEvidenceMatch] {
+        guard matches.count > Self.maximumMatchesPerCategory,
+              let alias = matches.first(where: {
+                  $0.catalogField == .alias && $0.source != .searchQuery
+              }),
+              let independent = matches.first(where: {
+                  $0.source != .searchQuery
+                      && [.manufacturerName, .packagingText]
+                          .contains($0.catalogField)
+              })
+        else {
+            return Array(matches.prefix(Self.maximumMatchesPerCategory))
+        }
+
+        var selected = [alias, independent]
+        for match in matches where !selected.contains(match) {
+            guard selected.count < Self.maximumMatchesPerCategory else {
+                break
+            }
+            selected.append(match)
+        }
+        return selected
+    }
+
+    /// The canonical identity must always have a corresponding candidate
+    /// summary, even when explanatory candidates exceed the wire limit.
+    static func boundedCandidates(
+        _ candidates: [MedicineEvidenceCandidate],
+        selectedMedicineID: String?
+    ) -> [MedicineEvidenceCandidate] {
+        let prefix = Array(candidates.prefix(Self.maximumCandidateCount))
+        guard let selectedMedicineID,
+              !prefix.contains(where: {
+                  $0.medicine.id == selectedMedicineID
+              }),
+              let selected = candidates.first(where: {
+                  $0.medicine.id == selectedMedicineID
+              })
+        else {
+            return prefix
+        }
+
+        return [selected] + prefix.prefix(Self.maximumCandidateCount - 1)
     }
 
     private func observationDTO(

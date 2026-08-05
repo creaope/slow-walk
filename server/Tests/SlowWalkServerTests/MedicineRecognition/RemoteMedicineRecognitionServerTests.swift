@@ -3,6 +3,7 @@ import Hummingbird
 import HummingbirdTesting
 import SlowWalkAPIContracts
 import SlowWalkDataInterfaces
+import SlowWalkDomain
 @testable import SlowWalkServer
 import XCTest
 
@@ -73,6 +74,73 @@ final class RemoteMedicineRecognitionServerTests:
                 )
             }
         }
+    }
+
+    func testBoundedSupportingEvidencePreservesCorroborationWitnesses() {
+        let aliases = (0 ..< 16).map { index in
+            MedicineEvidenceMatch(
+                source: .probableProductName,
+                observedText: "Alias \(index)",
+                normalizedObservedText: "alias \(index)",
+                catalogField: .alias,
+                catalogText: "Alias \(index)"
+            )
+        }
+        let manufacturer = MedicineEvidenceMatch(
+            source: .manufacturerName,
+            observedText: "Example Pharma",
+            normalizedObservedText: "example pharma",
+            catalogField: .manufacturerName,
+            catalogText: "Example Pharma"
+        )
+
+        let projected = RemoteMedicineRecognitionController
+            .boundedSupportingMatches(aliases + [manufacturer])
+
+        XCTAssertEqual(
+            projected.count,
+            RemoteMedicineRecognitionController.maximumMatchesPerCategory
+        )
+        XCTAssertTrue(projected.contains(aliases[0]))
+        XCTAssertTrue(projected.contains(manufacturer))
+        XCTAssertFalse(projected.contains(aliases[15]))
+    }
+
+    func testBoundedCandidatesAlwaysIncludeCanonicalSelection() {
+        let candidates = (0 ..< 9).map { index in
+            MedicineEvidenceCandidate(
+                medicine: Medicine(
+                    id: "medicine-\(index)",
+                    canonicalName: "Medicine \(index)",
+                    aliases: [],
+                    activeIngredientIDs: [],
+                    medicineCategory: .other,
+                    sourceReferences: [],
+                    dosageTextFromSource: nil,
+                    contraindicationTags: []
+                ),
+                exactEvidence: [],
+                supportingEvidence: [],
+                conflictingEvidence: [],
+                unresolvedEvidence: []
+            )
+        }
+
+        let projected = RemoteMedicineRecognitionController
+            .boundedCandidates(
+                candidates,
+                selectedMedicineID: "medicine-8"
+            )
+
+        XCTAssertEqual(
+            projected.count,
+            RemoteMedicineRecognitionController.maximumCandidateCount
+        )
+        XCTAssertEqual(projected.first?.medicine.id, "medicine-8")
+        XCTAssertEqual(Set(projected.map(\.medicine.id)).count, 8)
+        XCTAssertFalse(projected.contains(where: {
+            $0.medicine.id == "medicine-7"
+        }))
     }
 
     func testAmbiguousEvidenceIsNotPromotedOrFallbackEligible()
