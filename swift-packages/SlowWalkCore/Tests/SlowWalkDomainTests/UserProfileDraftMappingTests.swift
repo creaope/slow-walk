@@ -26,6 +26,14 @@ final class UserProfileDraftMappingTests: XCTestCase {
         XCTAssertEqual(draft.currentMedicineNames, ["泰诺", "降压片"])
     }
 
+    func testPreservesPreferredNameWhitespaceAndCase() {
+        let profile = makeBundle(preferredName: " LiN ")
+
+        let draft = UserProfileDraft(profile: profile)
+
+        XCTAssertEqual(draft.preferredName, " LiN ")
+    }
+
     func testCanonicalAllergyIdentityDoesNotPolluteDraft() {
         let profile = makeBundle(
             canonicalAllergies: [
