@@ -5,7 +5,7 @@
 - Fixed baseline SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894`
 - Branch: `feature/zhipu-online-medicine-mainline`
 - Start time: `2026-08-05 23:55:56 CST (+0800)`
-- Current phase: `Phase 2B - checkpoint archive`
+- Current phase: `Phase 2C - Server medicine recognition API`
 - Overall status: `IN_PROGRESS`
 - Initial `origin/develop` SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894` (verified against remote with `git ls-remote`)
 - Final `origin/develop` SHA: `PENDING`
@@ -19,8 +19,8 @@
 | --- | --- | --- | --- | --- | --- |
 | 0 - Preflight | PASSED_WITH_LIMITATION | `775de0f2ec82ee1e1779f94c021011639ae29593` | `23032be22ef00ca8ffa0e4721bbfe5396f6d8040` | `checkpoint/zhipu-night-0-preflight` | Branch/baseline/remote/architecture/CI/assets audit passed; archive gates passed |
 | 2A - Structured package evidence | PASSED | `cdf1c11ea450328144c4515c8ea5f403e2eb6200` | `1a33db77b7682290fc698de4263a26e7b561cf2c` | `checkpoint/zhipu-night-2a-evidence` | Full Server suite: 171 passed, 1 live smoke skipped, 0 failed |
-| 2B - Controlled retrieval and verification | PASSED | PENDING | PENDING | PENDING | Focused 22/22 and full Server 193 passed; 1 live smoke skipped; 0 failed |
-| 2C - Server recognition API | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
+| 2B - Controlled retrieval and verification | PASSED | `e35eaa58116500cc212ba9797f61e6720fe8ae82` | PENDING (this record commit) | `checkpoint/zhipu-night-2b-resolution` | Focused 22/22 and full Server 193 passed; 1 live smoke skipped; 0 failed |
+| 2C - Server recognition API | IN_PROGRESS | PENDING | PENDING | PENDING | NOT_RUN |
 | 3 - iOS remote adapter | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 | 4 - Remote-first composition | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 | 5 - Full regression and smoke | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
@@ -177,6 +177,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Added: `server/Sources/SlowWalkServer/MedicineRecognition/RemoteMedicineCandidateResolver.swift`
 - Added: `server/Tests/SlowWalkServerTests/MedicineRecognition/RemoteMedicineCandidateResolverTests.swift`
 - Business/test diff before state updates: `+1273/-0`
+- Archived phase commit diff: `+1294/-4` including state updates.
 - Final review findings: `P0=0, P1=0, P2=0`
 - Resolved review finding: auxiliary-only evidence now participates in cross-medicine conflict detection while remaining unable to recall a candidate alone.
 - Resolved review finding: a strong overlay match cannot open the resolver gate for a different medicine that shares an ordinary alias; cross-ID identity matches remain ambiguous.
@@ -195,7 +196,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 
 ## Next Action
 
-- Re-run the Phase 2B full Server suite, execute archive diff/stat/prohibited-file gates, commit/push, create/push `checkpoint/zhipu-night-2b-resolution`, then record its SHA and start Phase 2C.
+- Add the shared v1 recognition DTO contract, bounded Server controller/service, stable provider/result mappings, dependency injection, and Fake extractor integration tests without running risk assessment.
 
 ## Safety Record
 
