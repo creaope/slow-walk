@@ -12,6 +12,7 @@
 - Did develop move during the run: `NO`
 - Real network smoke run: `NO - SKIPPED (required credential environment variable is absent)`
 - Real API key used: `NO`
+- Draft PR: `PENDING`
 
 ## Phase Status
 
@@ -23,7 +24,7 @@
 | 2C - Server recognition API | PASSED | `758b6bdc8027d16b19b6baa52390de8377774ad9` | `90123f98d4e6877147b396e9c2e4c6e078a5fe61` | `checkpoint/zhipu-night-2c-server-api` | Core 365/365 and Server 209/209 passed; 1 live smoke skipped |
 | 3 - iOS remote adapter | PASSED | `27342c40dee61da1d77603e4d48b60ff05886b1b` | `817f11f34ff151f6f40a6cf17fe00830c7b137af` | `checkpoint/zhipu-night-3-ios-client` | Core 392/392, Server 211/211, and iOS Simulator 29/29 passed; 1 credential-gated live test skipped |
 | 4 - Remote-first composition | PASSED_WITH_LIMITATION | `50b469c5fde1badca493befb11fa52f939a5ab2e` | `4776fdf5775b29db41dd2bbf9403f090aa5be481` | `checkpoint/zhipu-night-4-composition` | Core 414/414, Presentation 74/74, Server 211/211, and final iOS composition 89/89 passed; P0=0, P1=0, P2=2 |
-| 5 - Full regression and smoke | PASSED_WITH_LIMITATION | `6471894268247a68ea0a16e9e17a29f96df34e38` | PENDING | `checkpoint/zhipu-night-5-final` | Core 414/414, Presentation 74/74, Server 212/212, iOS Simulator 387/387; real Provider smoke skipped; P0=0, P1=0, P2=9 |
+| 5 - Full regression and smoke | PASSED_WITH_LIMITATION | `6471894268247a68ea0a16e9e17a29f96df34e38` | `745665181dd62840d87651e26d26904615fe4f46` | `checkpoint/zhipu-night-5-final` | Core 414/414, Presentation 74/74, Server 212/212, iOS Simulator 387/387; real Provider smoke skipped; P0=0, P1=0, P2=9 |
 
 ## Preflight Findings And Plan
 
@@ -243,6 +244,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Final cumulative diff from fixed baseline: 56 files, `+12809/-139` before the final state-only archive record.
 - Implementation commit: `6471894268247a68ea0a16e9e17a29f96df34e38` (pushed and remote branch verified).
 - Annotated checkpoint: `checkpoint/zhipu-night-5-final` (pushed and verified to dereference to the implementation commit).
+- State-record commit: `745665181dd62840d87651e26d26904615fe4f46` (pushed and remote branch verified; cumulative snapshot became 56 files, `+12813/-139`).
 
 ## Phase Change Records
 
@@ -398,7 +400,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 
 ## Next Action
 
-- Create and push the final state-only archive commit, verify all remote checkpoints and a clean worktree, then create the permitted Draft PR without enabling auto-merge.
+- Push this final state-SHA record, verify all Draft PR preconditions and a clean worktree, then create the permitted Draft PR without enabling auto-merge.
 
 ## Safety Record
 
