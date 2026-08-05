@@ -5,7 +5,7 @@
 - Fixed baseline SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894`
 - Branch: `feature/zhipu-online-medicine-mainline`
 - Start time: `2026-08-05 23:55:56 CST (+0800)`
-- Current phase: `Phase 0 - checkpoint archive`
+- Current phase: `Phase 2A - structured medicine package evidence`
 - Overall status: `IN_PROGRESS`
 - Initial `origin/develop` SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894` (verified against remote with `git ls-remote`)
 - Final `origin/develop` SHA: `PENDING`
@@ -17,8 +17,8 @@
 
 | Phase | Status | Implementation commit | State-record commit | Checkpoint tag | Tests |
 | --- | --- | --- | --- | --- | --- |
-| 0 - Preflight | PASSED_WITH_LIMITATION | PENDING | PENDING | PENDING | Branch/baseline/remote/architecture/CI/assets audit passed |
-| 2A - Structured package evidence | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
+| 0 - Preflight | PASSED_WITH_LIMITATION | `775de0f2ec82ee1e1779f94c021011639ae29593` | PENDING (this record commit) | `checkpoint/zhipu-night-0-preflight` | Branch/baseline/remote/architecture/CI/assets audit passed; archive gates passed |
+| 2A - Structured package evidence | IN_PROGRESS | PENDING | PENDING | PENDING | NOT_RUN |
 | 2B - Controlled retrieval and verification | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 | 2C - Server recognition API | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 | 3 - iOS remote adapter | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
@@ -158,7 +158,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 
 ## Next Action
 
-- Run Phase 0 archive gates, commit/push the preflight record, create the annotated preflight checkpoint, then start Phase 2A.
+- Implement the strict structured medicine package evidence contract by reusing the existing Zhipu transport/retry/cancellation boundary, then run the focused Vision regressions.
 
 ## Safety Record
 
