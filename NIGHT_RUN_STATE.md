@@ -5,11 +5,11 @@
 - Fixed baseline SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894`
 - Branch: `feature/zhipu-online-medicine-mainline`
 - Start time: `2026-08-05 23:55:56 CST (+0800)`
-- Current phase: `Phase 5 - full regression and smoke`
-- Overall status: `IN_PROGRESS`
+- Current phase: `COMPLETE - Draft PR preparation`
+- Overall status: `PASSED_WITH_LIMITATION`
 - Initial `origin/develop` SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894` (verified against remote with `git ls-remote`)
-- Final `origin/develop` SHA: `PENDING`
-- Did develop move during the run: `PENDING`
+- Final `origin/develop` SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894`
+- Did develop move during the run: `NO`
 - Real network smoke run: `NO - SKIPPED (required credential environment variable is absent)`
 - Real API key used: `NO`
 
@@ -23,7 +23,7 @@
 | 2C - Server recognition API | PASSED | `758b6bdc8027d16b19b6baa52390de8377774ad9` | `90123f98d4e6877147b396e9c2e4c6e078a5fe61` | `checkpoint/zhipu-night-2c-server-api` | Core 365/365 and Server 209/209 passed; 1 live smoke skipped |
 | 3 - iOS remote adapter | PASSED | `27342c40dee61da1d77603e4d48b60ff05886b1b` | `817f11f34ff151f6f40a6cf17fe00830c7b137af` | `checkpoint/zhipu-night-3-ios-client` | Core 392/392, Server 211/211, and iOS Simulator 29/29 passed; 1 credential-gated live test skipped |
 | 4 - Remote-first composition | PASSED_WITH_LIMITATION | `50b469c5fde1badca493befb11fa52f939a5ab2e` | `4776fdf5775b29db41dd2bbf9403f090aa5be481` | `checkpoint/zhipu-night-4-composition` | Core 414/414, Presentation 74/74, Server 211/211, and final iOS composition 89/89 passed; P0=0, P1=0, P2=2 |
-| 5 - Full regression and smoke | IN_PROGRESS | PENDING | PENDING | PENDING | Core 414/414, Presentation 74/74, Server 212/212, and iOS Simulator 387/387 passed; final independent review pending |
+| 5 - Full regression and smoke | PASSED_WITH_LIMITATION | `6471894268247a68ea0a16e9e17a29f96df34e38` | PENDING | `checkpoint/zhipu-night-5-final` | Core 414/414, Presentation 74/74, Server 212/212, iOS Simulator 387/387; real Provider smoke skipped; P0=0, P1=0, P2=9 |
 
 ## Preflight Findings And Plan
 
@@ -239,6 +239,10 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Modified: `server/Tests/SlowWalkServerTests/MedicineRecognition/RemoteMedicineRecognitionServerTests.swift` with application-level query/header/body log canaries.
 - Business/test diff excluding the run-state file before final state additions: `+175/-5`.
 - Package manifest, dependency, route, DTO, medical rule, canonical resolver, pipeline, RiskEngine, ActionCard, CI, signing, entitlement, bundle identifier, Onboarding, and Profile changes: `NONE`.
+- Archived Phase 5 implementation diff: 4 files, `+231/-15` including run-state updates.
+- Final cumulative diff from fixed baseline: 56 files, `+12809/-139` before the final state-only archive record.
+- Implementation commit: `6471894268247a68ea0a16e9e17a29f96df34e38` (pushed and remote branch verified).
+- Annotated checkpoint: `checkpoint/zhipu-night-5-final` (pushed and verified to dereference to the implementation commit).
 
 ## Phase Change Records
 
@@ -394,7 +398,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 
 ## Next Action
 
-- Create and push the Phase 5 implementation commit and annotated final checkpoint, then complete the final develop/state/cleanliness record in a state-only archive commit.
+- Create and push the final state-only archive commit, verify all remote checkpoints and a clean worktree, then create the permitted Draft PR without enabling auto-merge.
 
 ## Safety Record
 
