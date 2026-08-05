@@ -5,7 +5,7 @@
 - Fixed baseline SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894`
 - Branch: `feature/zhipu-online-medicine-mainline`
 - Start time: `2026-08-05 23:55:56 CST (+0800)`
-- Current phase: `Phase 2A - structured medicine package evidence`
+- Current phase: `Phase 2A - checkpoint archive`
 - Overall status: `IN_PROGRESS`
 - Initial `origin/develop` SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894` (verified against remote with `git ls-remote`)
 - Final `origin/develop` SHA: `PENDING`
@@ -17,8 +17,8 @@
 
 | Phase | Status | Implementation commit | State-record commit | Checkpoint tag | Tests |
 | --- | --- | --- | --- | --- | --- |
-| 0 - Preflight | PASSED_WITH_LIMITATION | `775de0f2ec82ee1e1779f94c021011639ae29593` | PENDING (this record commit) | `checkpoint/zhipu-night-0-preflight` | Branch/baseline/remote/architecture/CI/assets audit passed; archive gates passed |
-| 2A - Structured package evidence | IN_PROGRESS | PENDING | PENDING | PENDING | NOT_RUN |
+| 0 - Preflight | PASSED_WITH_LIMITATION | `775de0f2ec82ee1e1779f94c021011639ae29593` | `23032be22ef00ca8ffa0e4721bbfe5396f6d8040` | `checkpoint/zhipu-night-0-preflight` | Branch/baseline/remote/architecture/CI/assets audit passed; archive gates passed |
+| 2A - Structured package evidence | PASSED | PENDING | PENDING | PENDING | Full Server suite: 171 passed, 1 live smoke skipped, 0 failed |
 | 2B - Controlled retrieval and verification | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 | 2C - Server recognition API | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 | 3 - iOS remote adapter | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
@@ -144,6 +144,25 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Full regression: `NOT_RUN`
 - iOS Simulator tests: `NOT_RUN`
 - Real Zhipu smoke: `SKIPPED` (no supported API key environment variable present)
+- Phase 2A focused evidence parsing tests: `PASSED` (15/15)
+- Phase 2A Zhipu client regressions: `PASSED` (33/33)
+- Phase 2A Vision request-model regressions: `PASSED` (12/12)
+- Phase 2A full Server suite: `PASSED` (171 executed, 0 failures; 1 live network test skipped by explicit opt-in gate)
+- Phase 2A `git diff --check`: `PASSED` (tracked and newly added files)
+- Phase 2A changed-file/stat review: `PASSED` (5 files; gate snapshot before these result lines was `+774/-14`)
+- Phase 2A prohibited-file review: `PASSED` (Vision implementation/tests and the run-state file only)
+
+## Phase Change Records
+
+### Phase 2A
+
+- Modified: `server/Sources/SlowWalkServer/Vision/VisionRequestModels.swift`
+- Modified: `server/Sources/SlowWalkServer/Vision/ZhipuVisionClient.swift`
+- Modified: `server/Tests/SlowWalkServerTests/Vision/ZhipuVisionClientTests.swift`
+- Added: `server/Tests/SlowWalkServerTests/Vision/RemoteMedicinePackageEvidenceTests.swift`
+- Business/test diff before state updates: `+754/-10`
+- Review findings: `P0=0, P1=0, P2=0`
+- Limitation: the preflight plan anticipated a separate evidence source file; the final bounded type is colocated with the existing Zhipu client. This does not alter module ownership or behavior.
 
 ## Known Issues
 
@@ -158,7 +177,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 
 ## Next Action
 
-- Implement the strict structured medicine package evidence contract by reusing the existing Zhipu transport/retry/cancellation boundary, then run the focused Vision regressions.
+- Run Phase 2A archive gates, commit/push the evidence implementation, create/push `checkpoint/zhipu-night-2a-evidence`, then record its SHA and start Phase 2B.
 
 ## Safety Record
 

@@ -34,6 +34,119 @@ final class ZhipuVisionClientTests: XCTestCase, @unchecked Sendable {
         XCTAssertTrue(requestBody.contains(imageData.base64EncodedString()))
     }
 
+    func testMedicinePackageEvidenceUsesDedicatedStrictRequest() async throws {
+        let transport = StubVisionTransport(steps: [
+            .response(completion(content: medicineEvidenceContent())),
+        ])
+        let client = try makeClient(transport: transport, maxAttempts: 1)
+
+        let evidence = try await client.extractMedicinePackageEvidence(
+            from: VisionImagePayload(data: imageData, mimeType: "image/png")
+        )
+
+        XCTAssertEqual(evidence.visibleTexts, ["泰诺", "500 mg"])
+        XCTAssertEqual(evidence.probableProductNames, ["泰诺"])
+        XCTAssertEqual(evidence.probableGenericNames, ["对乙酰氨基酚"])
+        XCTAssertEqual(evidence.manufacturerNames, ["示例制药"])
+        XCTAssertEqual(evidence.approvalIdentifiers, ["国药准字 H12345678"])
+        XCTAssertEqual(evidence.dosageFormTexts, ["薄膜衣片"])
+        XCTAssertEqual(evidence.packagingFeatures, ["红白纸盒"])
+        XCTAssertEqual(evidence.searchQueries, ["泰诺 对乙酰氨基酚"])
+        XCTAssertTrue(evidence.imageReadable)
+        XCTAssertFalse(evidence.uncertainRegionsPresent)
+
+        let capturedRequest = await transport.firstRequest()
+        let request = try XCTUnwrap(capturedRequest)
+        let instruction = try requestInstruction(from: request)
+        for key in [
+            "visibleTexts", "probableProductNames", "probableGenericNames",
+            "manufacturerNames", "approvalIdentifiers", "dosageFormTexts",
+            "packagingFeatures", "searchQueries", "imageReadable",
+            "uncertainRegionsPresent",
+        ] {
+            XCTAssertTrue(instruction.contains(key), key)
+        }
+        XCTAssertTrue(instruction.contains("no Markdown"))
+        XCTAssertTrue(instruction.contains("not canonical facts"))
+    }
+
+    func testVisibleTextExtractionKeepsOriginalThreeFieldContract() async throws {
+        let execution = try await run([
+            .response(completion(content: modelContent(
+                visibleTexts: ["LOT 42", "2028-01"]
+            ))),
+        ])
+
+        XCTAssertEqual(execution.result, .success(.fixture))
+        let capturedRequest = await execution.transport.firstRequest()
+        let request = try XCTUnwrap(capturedRequest)
+        let instruction = try requestInstruction(from: request)
+        XCTAssertTrue(instruction.contains("visibleTexts"))
+        XCTAssertTrue(instruction.contains("imageReadable"))
+        XCTAssertTrue(instruction.contains("uncertainRegionsPresent"))
+        XCTAssertFalse(instruction.contains("probableProductNames"))
+        XCTAssertFalse(instruction.contains("searchQueries"))
+    }
+
+    func testMedicinePackageEvidence429DoesNotRetry() async throws {
+        let transport = StubVisionTransport(steps: [
+            .response(status(429)),
+            .response(completion(content: medicineEvidenceContent())),
+        ])
+        let client = try makeClient(transport: transport, maxAttempts: 3)
+
+        do {
+            _ = try await client.extractMedicinePackageEvidence(
+                from: VisionImagePayload(data: imageData, mimeType: "image/png")
+            )
+            XCTFail("HTTP 429 must fail without retrying.")
+        } catch let error as ZhipuVisionClientError {
+            XCTAssertEqual(
+                error,
+                .rateLimited(providerIdentifier: "zhipu", statusCode: 429)
+            )
+        }
+        let callCount = await transport.callCount()
+        XCTAssertEqual(callCount, 1)
+    }
+
+    func testMedicinePackageEvidence5xxUsesBoundedRetry() async throws {
+        let transport = StubVisionTransport(steps: [
+            .response(status(503)),
+            .response(completion(content: medicineEvidenceContent())),
+        ])
+        let client = try makeClient(transport: transport, maxAttempts: 2)
+
+        let evidence = try await client.extractMedicinePackageEvidence(
+            from: VisionImagePayload(data: imageData, mimeType: "image/png")
+        )
+
+        XCTAssertEqual(evidence.probableProductNames, ["泰诺"])
+        let callCount = await transport.callCount()
+        XCTAssertEqual(callCount, 2)
+    }
+
+    func testMedicinePackageEvidenceCancellationPropagatesWithoutRetry() async throws {
+        let transport = StubVisionTransport(steps: [
+            .cancellation,
+            .response(completion(content: medicineEvidenceContent())),
+        ])
+        let client = try makeClient(transport: transport, maxAttempts: 3)
+
+        do {
+            _ = try await client.extractMedicinePackageEvidence(
+                from: VisionImagePayload(data: imageData, mimeType: "image/png")
+            )
+            XCTFail("Cancellation must propagate.")
+        } catch is CancellationError {
+            // Expected.
+        } catch {
+            XCTFail("Unexpected cancellation error: \(error)")
+        }
+        let callCount = await transport.callCount()
+        XCTAssertEqual(callCount, 1)
+    }
+
     func testClientUsesPrimaryModelWithoutExecutingFallback() async throws {
         let execution = try await run(
             [.response(completion(content: modelContent(
@@ -733,6 +846,39 @@ final class ZhipuVisionClientTests: XCTestCase, @unchecked Sendable {
         ]
         let data = try! JSONSerialization.data(withJSONObject: object)
         return String(decoding: data, as: UTF8.self)
+    }
+
+    private func medicineEvidenceContent() -> String {
+        let object: [String: Any] = [
+            "visibleTexts": ["泰诺", "500 mg"],
+            "probableProductNames": ["泰诺"],
+            "probableGenericNames": ["对乙酰氨基酚"],
+            "manufacturerNames": ["示例制药"],
+            "approvalIdentifiers": ["国药准字 H12345678"],
+            "dosageFormTexts": ["薄膜衣片"],
+            "packagingFeatures": ["红白纸盒"],
+            "searchQueries": ["泰诺 对乙酰氨基酚"],
+            "imageReadable": true,
+            "uncertainRegionsPresent": false,
+        ]
+        let data = try! JSONSerialization.data(withJSONObject: object)
+        return String(decoding: data, as: UTF8.self)
+    }
+
+    private func requestInstruction(
+        from request: VisionTransportRequest
+    ) throws -> String {
+        let body = try XCTUnwrap(
+            try JSONSerialization.jsonObject(with: request.body)
+                as? [String: Any]
+        )
+        let messages = try XCTUnwrap(body["messages"] as? [[String: Any]])
+        let message = try XCTUnwrap(messages.first)
+        let parts = try XCTUnwrap(message["content"] as? [[String: Any]])
+        let textPart = try XCTUnwrap(
+            parts.first { $0["type"] as? String == "text" }
+        )
+        return try XCTUnwrap(textPart["text"] as? String)
     }
 }
 
