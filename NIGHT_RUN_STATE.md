@@ -21,7 +21,7 @@
 | 2A - Structured package evidence | PASSED | `cdf1c11ea450328144c4515c8ea5f403e2eb6200` | `1a33db77b7682290fc698de4263a26e7b561cf2c` | `checkpoint/zhipu-night-2a-evidence` | Full Server suite: 171 passed, 1 live smoke skipped, 0 failed |
 | 2B - Controlled retrieval and verification | PASSED | `e35eaa58116500cc212ba9797f61e6720fe8ae82` | `9a0d2d0bb9770aa373c6ffe1b1e5eeb40880f80a` | `checkpoint/zhipu-night-2b-resolution` | Focused 22/22 and full Server 193 passed; 1 live smoke skipped; 0 failed |
 | 2C - Server recognition API | PASSED | `758b6bdc8027d16b19b6baa52390de8377774ad9` | `90123f98d4e6877147b396e9c2e4c6e078a5fe61` | `checkpoint/zhipu-night-2c-server-api` | Core 365/365 and Server 209/209 passed; 1 live smoke skipped |
-| 3 - iOS remote adapter | PASSED | PENDING | PENDING | PENDING | Core 392/392, Server 211/211, and iOS Simulator 29/29 passed; 1 credential-gated live test skipped |
+| 3 - iOS remote adapter | PASSED | `27342c40dee61da1d77603e4d48b60ff05886b1b` | PENDING | `checkpoint/zhipu-night-3-ios-client` | Core 392/392, Server 211/211, and iOS Simulator 29/29 passed; 1 credential-gated live test skipped |
 | 4 - Remote-first composition | IN_PROGRESS | PENDING | PENDING | PENDING | Read-only composition audit passed; implementation not started |
 | 5 - Full regression and smoke | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 
@@ -262,6 +262,23 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Resolved review finding: Server bounded summaries always retain the selected canonical candidate and the alias plus independent packaging/manufacturer witnesses needed to validate corroborated recognition.
 - Package manifest and Xcode project changes: `NONE`.
 - Final review findings: `P0=0, P1=0, P2=3`.
+- Implementation commit: `27342c40dee61da1d77603e4d48b60ff05886b1b` (pushed and remote branch verified).
+- Annotated checkpoint: `checkpoint/zhipu-night-3-ios-client` (pushed and verified to dereference to the implementation commit).
+
+### Phase 4 Audit
+
+- Composition point: extend the existing `MedicineAssessmentCoordinator` recognition-input boundary; retain its single active task, generation, cancellation, and state stream.
+- Planned Core addition: a stateless remote-first recognition router returning the existing `MedicineRecognitionInput`, source provenance, optional fallback reason, and remote expected canonical identity.
+- Approved fallback only: local-only/privacy mode, offline, timeout, rate limit, Server unavailable, and Provider unavailable.
+- Prohibited fallback: ambiguous, no candidate, unreadable, invalid response, invalid/oversized image, canonical conflict, and cancellation.
+- Canonical safety: the existing local assessment requester still runs the sole MedicinePipeline/MedicineResolver/RiskEngine/ActionCardFactory; a remote result is published only when that pipeline's selected ID and name agree with the Server expectation.
+- Provenance: `remote` or `localFallback` must survive pending confirmation and reach Presentation as non-medical context; fallback copy must not expose Provider or HTTP terminology.
+- Privacy mode semantics: the mode is snapshotted for a submitted assessment; Settings changes affect the next submission rather than racing an active operation.
+- Configuration limitation: the repository has no production iOS Server base URL. Composition will accept an externally supplied HTTPS URL and remain local-only when absent; no URL or credential will be invented.
+- Privacy wording requirement: current capability/permission copy claims device-only behavior and must be updated wherever online recognition is enabled; any Xcode project edit is limited to usage-description text and must not touch signing, entitlements, or bundle identifiers.
+- Package manifest changes required: `NONE`.
+- Third-party dependencies required: `NONE`.
+- Architecture blocker: `NO` for implementation and Fake integration tests; real iOS online smoke remains limited by the absent deployment URL and Provider credential.
 
 ## Known Issues
 
@@ -281,7 +298,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 
 ## Next Action
 
-- Run Phase 3 archive gates and checkpoint protocol, then implement the audited remote-first composition without changing medical risk rules or ActionCard semantics.
+- Implement the audited stateless remote-first router, canonical cross-check, privacy preference, AppEnvironment wiring, and non-medical fallback provenance without changing medical risk rules or ActionCard semantics.
 
 ## Safety Record
 
