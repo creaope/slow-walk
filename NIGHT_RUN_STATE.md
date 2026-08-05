@@ -5,7 +5,7 @@
 - Fixed baseline SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894`
 - Branch: `feature/zhipu-online-medicine-mainline`
 - Start time: `2026-08-05 23:55:56 CST (+0800)`
-- Current phase: `Phase 2B - controlled retrieval and candidate verification`
+- Current phase: `Phase 2B - checkpoint archive`
 - Overall status: `IN_PROGRESS`
 - Initial `origin/develop` SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894` (verified against remote with `git ls-remote`)
 - Final `origin/develop` SHA: `PENDING`
@@ -18,8 +18,8 @@
 | Phase | Status | Implementation commit | State-record commit | Checkpoint tag | Tests |
 | --- | --- | --- | --- | --- | --- |
 | 0 - Preflight | PASSED_WITH_LIMITATION | `775de0f2ec82ee1e1779f94c021011639ae29593` | `23032be22ef00ca8ffa0e4721bbfe5396f6d8040` | `checkpoint/zhipu-night-0-preflight` | Branch/baseline/remote/architecture/CI/assets audit passed; archive gates passed |
-| 2A - Structured package evidence | PASSED | `cdf1c11ea450328144c4515c8ea5f403e2eb6200` | PENDING (this record commit) | `checkpoint/zhipu-night-2a-evidence` | Full Server suite: 171 passed, 1 live smoke skipped, 0 failed |
-| 2B - Controlled retrieval and verification | IN_PROGRESS | PENDING | PENDING | PENDING | NOT_RUN |
+| 2A - Structured package evidence | PASSED | `cdf1c11ea450328144c4515c8ea5f403e2eb6200` | `1a33db77b7682290fc698de4263a26e7b561cf2c` | `checkpoint/zhipu-night-2a-evidence` | Full Server suite: 171 passed, 1 live smoke skipped, 0 failed |
+| 2B - Controlled retrieval and verification | PASSED | PENDING | PENDING | PENDING | Focused 22/22 and full Server 193 passed; 1 live smoke skipped; 0 failed |
 | 2C - Server recognition API | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 | 3 - iOS remote adapter | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 | 4 - Remote-first composition | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
@@ -151,6 +151,12 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Phase 2A `git diff --check`: `PASSED` (tracked and newly added files)
 - Phase 2A changed-file/stat review: `PASSED` (5 files; gate snapshot before these result lines was `+774/-14`)
 - Phase 2A prohibited-file review: `PASSED` (Vision implementation/tests and the run-state file only)
+- Phase 2B focused controlled-search/resolver tests: `PASSED` (22/22)
+- Phase 2B full Server suite: `PASSED` (193 executed, 0 failures; 1 live network test skipped by explicit opt-in gate)
+- Phase 2B independent full Server re-run: `PASSED` (193 executed, 0 failures; 1 live network test skipped)
+- Phase 2B `git diff --check`: `PASSED` (tracked and newly added files)
+- Phase 2B changed-file/stat review: `PASSED` (4 files; gate snapshot before these result lines was `+1291/-4`)
+- Phase 2B prohibited-file and secret review: `PASSED` (controlled recognition source/tests and run-state file only; no secret pattern found)
 
 ## Phase Change Records
 
@@ -165,6 +171,17 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Review findings: `P0=0, P1=0, P2=0`
 - Limitation: the preflight plan anticipated a separate evidence source file; the final bounded type is colocated with the existing Zhipu client. This does not alter module ownership or behavior.
 
+### Phase 2B
+
+- Added: `server/Sources/SlowWalkServer/MedicineRecognition/MedicineEvidenceSearchProvider.swift`
+- Added: `server/Sources/SlowWalkServer/MedicineRecognition/RemoteMedicineCandidateResolver.swift`
+- Added: `server/Tests/SlowWalkServerTests/MedicineRecognition/RemoteMedicineCandidateResolverTests.swift`
+- Business/test diff before state updates: `+1273/-0`
+- Final review findings: `P0=0, P1=0, P2=0`
+- Resolved review finding: auxiliary-only evidence now participates in cross-medicine conflict detection while remaining unable to recall a candidate alone.
+- Resolved review finding: a strong overlay match cannot open the resolver gate for a different medicine that shares an ordinary alias; cross-ID identity matches remain ambiguous.
+- Package manifest changes: `NONE`
+
 ## Known Issues
 
 - None identified yet.
@@ -178,7 +195,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 
 ## Next Action
 
-- Implement deterministic controlled-catalog evidence retrieval and aggregation, preserve explainable exact/supporting/conflicting/unresolved evidence, and delegate final selection to the existing `MedicineResolver`.
+- Re-run the Phase 2B full Server suite, execute archive diff/stat/prohibited-file gates, commit/push, create/push `checkpoint/zhipu-night-2b-resolution`, then record its SHA and start Phase 2C.
 
 ## Safety Record
 
