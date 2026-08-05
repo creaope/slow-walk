@@ -5,7 +5,7 @@
 - Fixed baseline SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894`
 - Branch: `feature/zhipu-online-medicine-mainline`
 - Start time: `2026-08-05 23:55:56 CST (+0800)`
-- Current phase: `Phase 4 - remote-first composition`
+- Current phase: `Phase 5 - full regression and smoke`
 - Overall status: `IN_PROGRESS`
 - Initial `origin/develop` SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894` (verified against remote with `git ls-remote`)
 - Final `origin/develop` SHA: `PENDING`
@@ -22,8 +22,8 @@
 | 2B - Controlled retrieval and verification | PASSED | `e35eaa58116500cc212ba9797f61e6720fe8ae82` | `9a0d2d0bb9770aa373c6ffe1b1e5eeb40880f80a` | `checkpoint/zhipu-night-2b-resolution` | Focused 22/22 and full Server 193 passed; 1 live smoke skipped; 0 failed |
 | 2C - Server recognition API | PASSED | `758b6bdc8027d16b19b6baa52390de8377774ad9` | `90123f98d4e6877147b396e9c2e4c6e078a5fe61` | `checkpoint/zhipu-night-2c-server-api` | Core 365/365 and Server 209/209 passed; 1 live smoke skipped |
 | 3 - iOS remote adapter | PASSED | `27342c40dee61da1d77603e4d48b60ff05886b1b` | `817f11f34ff151f6f40a6cf17fe00830c7b137af` | `checkpoint/zhipu-night-3-ios-client` | Core 392/392, Server 211/211, and iOS Simulator 29/29 passed; 1 credential-gated live test skipped |
-| 4 - Remote-first composition | IN_PROGRESS | PENDING | PENDING | PENDING | Core 414/414, Presentation 74/74, Server 211/211, and final iOS composition 89/89 passed; final archive audit pending |
-| 5 - Full regression and smoke | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
+| 4 - Remote-first composition | PASSED_WITH_LIMITATION | `50b469c5fde1badca493befb11fa52f939a5ab2e` | PENDING | `checkpoint/zhipu-night-4-composition` | Core 414/414, Presentation 74/74, Server 211/211, and final iOS composition 89/89 passed; P0=0, P1=0, P2=2 |
+| 5 - Full regression and smoke | IN_PROGRESS | PENDING | PENDING | PENDING | CI-equivalent regression pending |
 
 ## Preflight Findings And Plan
 
@@ -323,9 +323,12 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Modified Core: `ClientFailures.swift`, `ClientViewStates.swift`, `MedicineAssessmentCoordinator.swift`, and `ClientFailureMapperTests.swift`.
 - Modified Presentation: `MedicinePresentationCopy.swift`, `MedicineStateMapper.swift`, `MedicineDisplayState.swift`, `MedicineAssessmentView.swift`, and `AccessibilityValueTests.swift`.
 - Business/test diff excluding the run-state file: `+2931/-125`.
+- Archived Phase 4 implementation diff: 28 files, `+2987/-134` including run-state updates.
 - Final pre-archive review: `P0=0`, `P1=0`, `P2=2` (deployment URL injection and public routing-context representability limitations recorded below).
 - Package manifest, CI workflow, signing, entitlement, bundle identifier, Onboarding, Profile, risk-rule, and ActionCard semantic changes: `NONE`.
 - Third-party dependency changes: `NONE`.
+- Implementation commit: `50b469c5fde1badca493befb11fa52f939a5ab2e` (pushed and remote branch verified).
+- Annotated checkpoint: `checkpoint/zhipu-night-4-composition` (pushed and verified to dereference to the implementation commit).
 
 ## Known Issues
 
@@ -345,7 +348,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 
 ## Next Action
 
-- Create and push the Phase 4 implementation commit and annotated checkpoint, record its SHA/tag in a state-only commit, then run the Phase 5 repository-wide CI-equivalent regression and credential-gated smoke decision.
+- Create and push the Phase 4 state-only archive commit, then run the Phase 5 repository-wide CI-equivalent regression and credential-gated smoke decision.
 
 ## Safety Record
 
