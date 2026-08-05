@@ -5,7 +5,7 @@
 - Fixed baseline SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894`
 - Branch: `feature/zhipu-online-medicine-mainline`
 - Start time: `2026-08-05 23:55:56 CST (+0800)`
-- Current phase: `Phase 2A - checkpoint archive`
+- Current phase: `Phase 2B - controlled retrieval and candidate verification`
 - Overall status: `IN_PROGRESS`
 - Initial `origin/develop` SHA: `1e382ab2e31d3fe2fbb9eb6068aeaae95428e894` (verified against remote with `git ls-remote`)
 - Final `origin/develop` SHA: `PENDING`
@@ -18,8 +18,8 @@
 | Phase | Status | Implementation commit | State-record commit | Checkpoint tag | Tests |
 | --- | --- | --- | --- | --- | --- |
 | 0 - Preflight | PASSED_WITH_LIMITATION | `775de0f2ec82ee1e1779f94c021011639ae29593` | `23032be22ef00ca8ffa0e4721bbfe5396f6d8040` | `checkpoint/zhipu-night-0-preflight` | Branch/baseline/remote/architecture/CI/assets audit passed; archive gates passed |
-| 2A - Structured package evidence | PASSED | PENDING | PENDING | PENDING | Full Server suite: 171 passed, 1 live smoke skipped, 0 failed |
-| 2B - Controlled retrieval and verification | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
+| 2A - Structured package evidence | PASSED | `cdf1c11ea450328144c4515c8ea5f403e2eb6200` | PENDING (this record commit) | `checkpoint/zhipu-night-2a-evidence` | Full Server suite: 171 passed, 1 live smoke skipped, 0 failed |
+| 2B - Controlled retrieval and verification | IN_PROGRESS | PENDING | PENDING | PENDING | NOT_RUN |
 | 2C - Server recognition API | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 | 3 - iOS remote adapter | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
 | 4 - Remote-first composition | NOT_STARTED | PENDING | PENDING | PENDING | NOT_RUN |
@@ -161,6 +161,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 - Modified: `server/Tests/SlowWalkServerTests/Vision/ZhipuVisionClientTests.swift`
 - Added: `server/Tests/SlowWalkServerTests/Vision/RemoteMedicinePackageEvidenceTests.swift`
 - Business/test diff before state updates: `+754/-10`
+- Archived phase commit diff: `+777/-14` including state updates.
 - Review findings: `P0=0, P1=0, P2=0`
 - Limitation: the preflight plan anticipated a separate evidence source file; the final bounded type is colocated with the existing Zhipu client. This does not alter module ownership or behavior.
 
@@ -177,7 +178,7 @@ No user profile, medication history, risk result, or ActionCard crosses the remo
 
 ## Next Action
 
-- Run Phase 2A archive gates, commit/push the evidence implementation, create/push `checkpoint/zhipu-night-2a-evidence`, then record its SHA and start Phase 2B.
+- Implement deterministic controlled-catalog evidence retrieval and aggregation, preserve explainable exact/supporting/conflicting/unresolved evidence, and delegate final selection to the existing `MedicineResolver`.
 
 ## Safety Record
 
