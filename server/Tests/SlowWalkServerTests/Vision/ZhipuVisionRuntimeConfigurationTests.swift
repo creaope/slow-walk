@@ -88,11 +88,11 @@ final class ZhipuVisionRuntimeConfigurationTests:
 
         XCTAssertEqual(
             configuration.primary.model,
-            "glm-4.6v-flash"
+            "glm-4.6v"
         )
         XCTAssertEqual(
             configuration.fallback.model,
-            "glm-4.6v"
+            "glm-4.6v-flash"
         )
     }
 
@@ -244,6 +244,6 @@ final class ZhipuVisionRuntimeConfigurationTests:
             request.url.absoluteString,
             "https://open.bigmodel.cn/api/paas/v4/chat/completions"
         )
-        XCTAssertEqual(body["model"] as? String, "glm-4.6v-flash")
+        XCTAssertEqual(body["model"] as? String, "glm-4.6v")
     }
 }

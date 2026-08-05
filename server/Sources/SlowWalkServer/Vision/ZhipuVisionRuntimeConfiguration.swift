@@ -57,8 +57,8 @@ struct ZhipuVisionRuntimeConfiguration:
     static let providerIdentifier = "zhipu"
     static let defaultBaseURLString =
         "https://open.bigmodel.cn/api/paas/v4"
-    static let defaultPrimaryModel = "glm-4.6v-flash"
-    static let defaultFallbackModel = "glm-4.6v"
+    static let defaultPrimaryModel = "glm-4.6v"
+    static let defaultFallbackModel = "glm-4.6v-flash"
 
     static let apiKeyEnvironmentKey = "ZHIPU_API_KEY"
     static let baseURLEnvironmentKey = "ZHIPU_BASE_URL"
