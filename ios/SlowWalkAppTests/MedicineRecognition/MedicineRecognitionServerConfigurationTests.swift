@@ -67,6 +67,145 @@ struct MedicineRecognitionServerConfigurationTests {
         }
     }
 
+    @Test func privateIPv4PolicyUsesCanonicalCIDRRanges() throws {
+        let permitted = [
+            "http://10.0.0.1:8080",
+            "http://10.255.255.254:8080",
+            "http://172.16.0.1:8080",
+            "http://172.31.255.254:8080",
+            "http://192.168.0.1:8080",
+            "http://192.168.255.254:8080",
+        ]
+        let rejected = [
+            "http://0.0.0.0:8080",
+            "http://8.8.8.8:8080",
+            "http://172.15.255.254:8080",
+            "http://172.32.0.1:8080",
+            "http://192.167.255.254:8080",
+            "http://example.com:8080",
+            "http://10.0.0.255:8080",
+            "http://172.31.255.255:8080",
+            "http://192.168.1.255:8080",
+        ]
+
+        for value in permitted {
+            let url = try #require(URL(string: value))
+            #expect(
+                MedicineRecognitionServerURLPolicy.permits(
+                    url,
+                    allowsPrivateNetworkHTTP: true
+                )
+            )
+        }
+        for value in rejected {
+            let url = try #require(URL(string: value))
+            #expect(
+                !MedicineRecognitionServerURLPolicy.permits(
+                    url,
+                    allowsPrivateNetworkHTTP: true
+                )
+            )
+        }
+    }
+
+    @Test func rejectsNonCanonicalIPv4Representations() throws {
+        let values = [
+            "http://3232235777:8080",
+            "http://0xC0.0xA8.0x01.0x17:8080",
+            "http://0300.0250.01.027:8080",
+            "http://192.168.1:8080",
+            "http://192.168.001.023:8080",
+            "http://192.168.0x1.23:8080",
+            "http://192%2e168%2e1%2e23:8080",
+            "http://%31%39%32.168.1.23:8080",
+        ]
+
+        for value in values {
+            let url = try #require(URL(string: value))
+            #expect(
+                !MedicineRecognitionServerURLPolicy.permits(
+                    url,
+                    allowsPrivateNetworkHTTP: true
+                )
+            )
+        }
+    }
+
+    @Test func rawConfigurationRejectsNormalizedIPv4Separators() {
+        let values = [
+            "http://192。168。1。23:8080",
+            "http://192．168．1．23:8080",
+            "http://192｡168｡1｡23:8080",
+        ]
+
+        for value in values {
+            #expect(
+                MedicineRecognitionServerURLPolicy.validatedURL(
+                    from: value,
+                    allowsPrivateNetworkHTTP: true
+                ) == nil
+            )
+            #expect(
+                MedicineRecognitionServerConfiguration(
+                    environment: [key: value],
+                    infoDictionary: [:]
+                ) == .unavailable
+            )
+        }
+    }
+
+    @Test func strictBuildPolicyRejectsPrivateHTTP() throws {
+        let privateURL = try #require(
+            URL(string: "http://192.168.1.23:8080")
+        )
+        let loopbackURL = try #require(
+            URL(string: "http://127.0.0.1:8080")
+        )
+        let secureURL = try #require(
+            URL(string: "https://medicine.example")
+        )
+
+        #expect(
+            !MedicineRecognitionServerURLPolicy.permits(
+                privateURL,
+                allowsPrivateNetworkHTTP: false
+            )
+        )
+        #expect(
+            MedicineRecognitionServerURLPolicy.permits(
+                loopbackURL,
+                allowsPrivateNetworkHTTP: false
+            )
+        )
+        #expect(
+            MedicineRecognitionServerURLPolicy.permits(
+                secureURL,
+                allowsPrivateNetworkHTTP: false
+            )
+        )
+    }
+
+    #if DEBUG
+    @Test func debugConfigurationPermitsPrivateIPv4HTTP() throws {
+        let values = [
+            "http://192.168.1.23:8080",
+            "http://10.0.0.5:8080",
+            "http://172.20.10.2:8080",
+        ]
+
+        for value in values {
+            let url = try #require(URL(string: value))
+            #expect(
+                MedicineRecognitionServerConfiguration(
+                    explicitBaseURL: url,
+                    environment: [:],
+                    infoDictionary: [:]
+                ) == .available(baseURL: url)
+            )
+        }
+    }
+    #endif
+
     @Test func missingAndBlankValuesAreUnavailable() {
         let missing = MedicineRecognitionServerConfiguration(
             environment: [:],
@@ -110,6 +249,8 @@ struct MedicineRecognitionServerConfigurationTests {
             "http://medicine.example",
             "http://localhost.example",
             "http://127.0.0.2",
+            "http://8.8.8.8",
+            "http://0.0.0.0",
         ]
 
         for value in values {

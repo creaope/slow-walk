@@ -211,8 +211,14 @@ func makeSlowWalkApplication(
     )
 }
 
+public func runSlowWalkServer() async throws {
+    try await runSlowWalkServer(
+        configuration: SlowWalkServerConfiguration.load()
+    )
+}
+
 public func runSlowWalkServer(
-    configuration: SlowWalkServerConfiguration = .init()
+    configuration: SlowWalkServerConfiguration
 ) async throws {
     let application = try makeSlowWalkApplication(
         configuration: configuration

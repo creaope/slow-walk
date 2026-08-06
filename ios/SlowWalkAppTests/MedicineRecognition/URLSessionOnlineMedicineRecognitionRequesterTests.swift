@@ -935,6 +935,8 @@ struct URLSessionOnlineMedicineRecognitionRequesterTests {
         let invalidURLs = [
             URL(string: "https://user:secret@medicine.test")!,
             URL(string: "http://medicine.test")!,
+            URL(string: "http://192%2e168%2e1%2e23:8080")!,
+            URL(string: "http://%31%39%32.168.1.23:8080")!,
         ]
 
         for baseURL in invalidURLs {
@@ -963,6 +965,38 @@ struct URLSessionOnlineMedicineRecognitionRequesterTests {
             )
         }
     }
+
+    #if DEBUG
+    @Test func privateNetworkHTTPBaseURLUsesExistingTransport() async throws {
+        let requestID = testUUID(181)
+        let responseData = encodedResponse(
+            recognizedResponse(requestID: requestID)
+        )
+        MockMedicineRecognitionURLProtocol.install { request, transport in
+            #expect(request.url?.scheme == "http")
+            #expect(request.url?.host == "192.168.1.23")
+            #expect(request.url?.port == 8080)
+            transport.complete(data: responseData)
+        }
+        let requester = URLSessionOnlineMedicineRecognitionRequester(
+            baseURL: URL(string: "http://192.168.1.23:8080/gateway/")!,
+            imagePreparer: StubMedicineRecognitionImagePreparer(
+                behavior: .success(
+                    PreparedMedicineRecognitionImage(
+                        data: Data([0xFF, 0xD8, 0xFF, 0xD9])
+                    )
+                )
+            ),
+            protocolClasses: [MockMedicineRecognitionURLProtocol.self]
+        )
+
+        _ = try await requester.recognize(
+            request: makeRequest(requestID: requestID)
+        )
+
+        #expect(MockMedicineRecognitionURLProtocol.snapshot.startCount == 1)
+    }
+    #endif
 
     private func makeRequester(
         preparedBytes: Data = Data([0xFF, 0xD8, 0xFF, 0xD9])

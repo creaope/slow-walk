@@ -242,13 +242,7 @@ nonisolated final class URLSessionOnlineMedicineRecognitionRequester:
     }
 
     private func endpointURL() -> URL? {
-        guard let scheme = baseURL.scheme?.lowercased(),
-              let host = baseURL.host?.lowercased(),
-              isPermitted(scheme: scheme, host: host),
-              baseURL.user == nil,
-              baseURL.password == nil,
-              baseURL.query == nil,
-              baseURL.fragment == nil,
+        guard MedicineRecognitionServerURLPolicy.permits(baseURL),
               var components = URLComponents(
                 url: baseURL,
                 resolvingAgainstBaseURL: false
@@ -391,18 +385,6 @@ nonisolated final class URLSessionOnlineMedicineRecognitionRequester:
         default:
             nil
         }
-    }
-
-    private func isPermitted(scheme: String, host: String) -> Bool {
-        if scheme == "https" {
-            return true
-        }
-        guard scheme == "http" else {
-            return false
-        }
-        return host == "localhost"
-            || host == "127.0.0.1"
-            || host == "::1"
     }
 
     private func hasJSONContentType(
