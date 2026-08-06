@@ -18,19 +18,7 @@ public struct MedicineRecognitionClientCapabilitiesDTO:
     }
 
     public init(from decoder: any Decoder) throws {
-        let rawContainer = try decoder.container(
-            keyedBy: MedicineRecognitionAnyCodingKey.self
-        )
-        let actualKeys = Set(rawContainer.allKeys.map(\.stringValue))
-        let allowedKeys = Set(CodingKeys.allCases.map(\.rawValue))
-        guard actualKeys.isSubset(of: allowedKeys) else {
-            throw DecodingError.dataCorrupted(.init(
-                codingPath: decoder.codingPath,
-                debugDescription:
-                    "Unexpected medicine recognition capability field."
-            ))
-        }
-
+        try decoder.validateMedicineRecognitionKeys(CodingKeys.self)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         supportsLocalFallback = try container.decode(
             Bool.self,
@@ -77,19 +65,7 @@ public struct MedicineRecognitionAPIRequestDTO:
     }
 
     public init(from decoder: any Decoder) throws {
-        let rawContainer = try decoder.container(
-            keyedBy: MedicineRecognitionAnyCodingKey.self
-        )
-        let actualKeys = Set(rawContainer.allKeys.map(\.stringValue))
-        let allowedKeys = Set(CodingKeys.allCases.map(\.rawValue))
-        guard actualKeys.isSubset(of: allowedKeys) else {
-            throw DecodingError.dataCorrupted(.init(
-                codingPath: decoder.codingPath,
-                debugDescription:
-                    "Unexpected medicine recognition request field."
-            ))
-        }
-
+        try decoder.validateMedicineRecognitionKeys(CodingKeys.self)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         imageBase64 = try container.decode(
             String.self,
@@ -197,6 +173,61 @@ public struct MedicinePackageEvidenceDTO:
         self.imageReadable = imageReadable
         self.uncertainRegionsPresent = uncertainRegionsPresent
     }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case visibleTexts
+        case probableProductNames
+        case probableGenericNames
+        case manufacturerNames
+        case approvalIdentifiers
+        case dosageFormTexts
+        case packagingFeatures
+        case searchQueries
+        case imageReadable
+        case uncertainRegionsPresent
+    }
+
+    public init(from decoder: any Decoder) throws {
+        try decoder.validateMedicineRecognitionKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        visibleTexts = try container.decode(
+            [String].self,
+            forKey: .visibleTexts
+        )
+        probableProductNames = try container.decode(
+            [String].self,
+            forKey: .probableProductNames
+        )
+        probableGenericNames = try container.decode(
+            [String].self,
+            forKey: .probableGenericNames
+        )
+        manufacturerNames = try container.decode(
+            [String].self,
+            forKey: .manufacturerNames
+        )
+        approvalIdentifiers = try container.decode(
+            [String].self,
+            forKey: .approvalIdentifiers
+        )
+        dosageFormTexts = try container.decode(
+            [String].self,
+            forKey: .dosageFormTexts
+        )
+        packagingFeatures = try container.decode(
+            [String].self,
+            forKey: .packagingFeatures
+        )
+        searchQueries = try container.decode(
+            [String].self,
+            forKey: .searchQueries
+        )
+        imageReadable = try container.decode(Bool.self, forKey: .imageReadable)
+        uncertainRegionsPresent = try container.decode(
+            Bool.self,
+            forKey: .uncertainRegionsPresent
+        )
+    }
 }
 
 /// Origin of one observed piece of package evidence.
@@ -260,6 +291,36 @@ public struct MedicineRecognitionEvidenceMatchDTO:
         self.catalogField = catalogField
         self.catalogText = catalogText
     }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case source
+        case observedText
+        case normalizedObservedText
+        case catalogField
+        case catalogText
+    }
+
+    public init(from decoder: any Decoder) throws {
+        try decoder.validateMedicineRecognitionKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        source = try container.decode(
+            MedicineRecognitionEvidenceSourceDTO.self,
+            forKey: .source
+        )
+        observedText = try container.decode(
+            String.self,
+            forKey: .observedText
+        )
+        normalizedObservedText = try container.decode(
+            String.self,
+            forKey: .normalizedObservedText
+        )
+        catalogField = try container.decode(
+            MedicineRecognitionCatalogFieldDTO.self,
+            forKey: .catalogField
+        )
+        catalogText = try container.decode(String.self, forKey: .catalogText)
+    }
 }
 
 /// Package evidence that did not match any controlled-catalog candidate.
@@ -281,6 +342,29 @@ public struct MedicineRecognitionEvidenceObservationDTO:
         self.source = source
         self.observedText = observedText
         self.normalizedText = normalizedText
+    }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case source
+        case observedText
+        case normalizedText
+    }
+
+    public init(from decoder: any Decoder) throws {
+        try decoder.validateMedicineRecognitionKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        source = try container.decode(
+            MedicineRecognitionEvidenceSourceDTO.self,
+            forKey: .source
+        )
+        observedText = try container.decode(
+            String.self,
+            forKey: .observedText
+        )
+        normalizedText = try container.decode(
+            String.self,
+            forKey: .normalizedText
+        )
     }
 }
 
@@ -313,6 +397,44 @@ public struct MedicineEvidenceCandidateSummaryDTO:
         self.conflictingEvidence = conflictingEvidence
         self.unresolvedEvidence = unresolvedEvidence
     }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case canonicalMedicineID
+        case canonicalName
+        case exactEvidence
+        case supportingEvidence
+        case conflictingEvidence
+        case unresolvedEvidence
+    }
+
+    public init(from decoder: any Decoder) throws {
+        try decoder.validateMedicineRecognitionKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        canonicalMedicineID = try container.decode(
+            String.self,
+            forKey: .canonicalMedicineID
+        )
+        canonicalName = try container.decode(
+            String.self,
+            forKey: .canonicalName
+        )
+        exactEvidence = try container.decode(
+            [MedicineRecognitionEvidenceMatchDTO].self,
+            forKey: .exactEvidence
+        )
+        supportingEvidence = try container.decode(
+            [MedicineRecognitionEvidenceMatchDTO].self,
+            forKey: .supportingEvidence
+        )
+        conflictingEvidence = try container.decode(
+            [MedicineRecognitionEvidenceMatchDTO].self,
+            forKey: .conflictingEvidence
+        )
+        unresolvedEvidence = try container.decode(
+            [MedicineRecognitionEvidenceMatchDTO].self,
+            forKey: .unresolvedEvidence
+        )
+    }
 }
 
 /// Minimal identity projection from the existing canonical resolver.
@@ -334,6 +456,29 @@ public struct MedicineCanonicalResolutionSummaryDTO:
         self.canonicalMedicineID = canonicalMedicineID
         self.canonicalName = canonicalName
         self.status = status
+    }
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case canonicalMedicineID
+        case canonicalName
+        case status
+    }
+
+    public init(from decoder: any Decoder) throws {
+        try decoder.validateMedicineRecognitionKeys(CodingKeys.self)
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        canonicalMedicineID = try container.decode(
+            String.self,
+            forKey: .canonicalMedicineID
+        )
+        canonicalName = try container.decode(
+            String.self,
+            forKey: .canonicalName
+        )
+        status = try container.decode(
+            MedicineCanonicalResolutionStatusDTO.self,
+            forKey: .status
+        )
     }
 }
 
@@ -388,7 +533,7 @@ public struct MedicineRecognitionAPIResponseDTO:
         self.apiVersion = apiVersion
     }
 
-    private enum CodingKeys: String, CodingKey {
+    private enum CodingKeys: String, CodingKey, CaseIterable {
         case status
         case requestID
         case packageEvidence
@@ -402,6 +547,7 @@ public struct MedicineRecognitionAPIResponseDTO:
     }
 
     public init(from decoder: any Decoder) throws {
+        try decoder.validateMedicineRecognitionKeys(CodingKeys.self)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         status = try container.decode(
             MedicineRecognitionStatusDTO.self,
@@ -443,6 +589,25 @@ public struct MedicineRecognitionAPIResponseDTO:
                 codingPath: decoder.codingPath,
                 debugDescription:
                     "Local fallback is not allowed for this recognition status."
+            ))
+        }
+    }
+}
+
+private extension Decoder {
+    func validateMedicineRecognitionKeys<Key>(
+        _ keyType: Key.Type
+    ) throws where Key: CodingKey & CaseIterable {
+        let rawContainer = try container(
+            keyedBy: MedicineRecognitionAnyCodingKey.self
+        )
+        let actualKeys = Set(rawContainer.allKeys.map(\.stringValue))
+        let allowedKeys = Set(Key.allCases.map(\.stringValue))
+        guard actualKeys.isSubset(of: allowedKeys) else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: codingPath,
+                debugDescription:
+                    "Unexpected medicine recognition contract field."
             ))
         }
     }

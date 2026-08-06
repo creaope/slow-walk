@@ -336,34 +336,43 @@ final class RemoteMedicineRecognitionServerTests:
         }
     }
 
-    func testProviderTimeoutAndMalformedPayloadHaveStableMappings()
+    func testProviderTimeoutRemainsRecoverable() async throws {
+        let extractor = FakeMedicinePackageEvidenceExtractor(
+            result: .failure(.timeout(providerIdentifier: "fake"))
+        )
+        let application = try makeApplication(extractor: extractor)
+
+        try await assertRecognition(
+            application: application,
+            expectedHTTPStatus: .gatewayTimeout
+        ) { output in
+            XCTAssertEqual(output.status, .providerUnavailable)
+            XCTAssertEqual(output.errorCode, .providerTimeout)
+            XCTAssertTrue(output.allowsLocalFallback)
+        }
+    }
+
+    func testProviderContractFailuresDoNotAllowLocalFallback()
         async throws
     {
-        let cases: [(ZhipuVisionClientError, HTTPResponse.Status, APIErrorCode)] = [
-            (
-                .timeout(providerIdentifier: "fake"),
-                .gatewayTimeout,
-                .providerTimeout
-            ),
-            (
-                .malformedProviderResponse(providerIdentifier: "fake"),
-                .badGateway,
-                .invalidProviderResponse
-            ),
+        let cases: [ZhipuVisionClientError] = [
+            .malformedProviderResponse(providerIdentifier: "fake"),
+            .invalidModelPayload(providerIdentifier: "fake"),
+            .invalidRequest(providerIdentifier: "fake", statusCode: 400),
         ]
 
-        for (providerError, status, code) in cases {
+        for providerError in cases {
             let extractor = FakeMedicinePackageEvidenceExtractor(
                 result: .failure(providerError)
             )
             let application = try makeApplication(extractor: extractor)
             try await assertRecognition(
                 application: application,
-                expectedHTTPStatus: status
+                expectedHTTPStatus: .badGateway
             ) { output in
                 XCTAssertEqual(output.status, .providerUnavailable)
-                XCTAssertEqual(output.errorCode, code)
-                XCTAssertTrue(output.allowsLocalFallback)
+                XCTAssertEqual(output.errorCode, .invalidProviderResponse)
+                XCTAssertFalse(output.allowsLocalFallback)
             }
         }
     }
@@ -386,7 +395,10 @@ final class RemoteMedicineRecognitionServerTests:
                     imageData: Data("private-image-marker".utf8)
                 )
             ) { response in
-                XCTAssertEqual(response.status, .serviceUnavailable)
+                XCTAssertEqual(response.status, .badGateway)
+                let output = try self.decodeRecognition(response.body)
+                XCTAssertEqual(output.errorCode, .invalidProviderResponse)
+                XCTAssertFalse(output.allowsLocalFallback)
                 let body = String(
                     decoding: response.body.readableBytesView,
                     as: UTF8.self

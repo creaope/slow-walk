@@ -215,6 +215,102 @@ final class MedicineRecognitionDTOTests: XCTestCase {
         XCTAssertFalse(json.localizedCaseInsensitiveContains("base64"))
     }
 
+    func testResponseRejectsUnknownTopLevelFieldsForSuccessAndError()
+        throws
+    {
+        let providerFailure = MedicineRecognitionAPIResponseDTO(
+            status: .providerUnavailable,
+            requestID: fixedRequestID,
+            packageEvidence: nil,
+            canonicalResolution: nil,
+            candidates: [],
+            unresolvedEvidence: [],
+            unresolvedReason: .providerUnavailable,
+            allowsLocalFallback: true,
+            errorCode: .providerUnavailable,
+            apiVersion: SlowWalkAPI.version
+        )
+
+        for response in [makeRecognizedResponse(), providerFailure] {
+            try assertResponseDecodingFails(response) { object in
+                object["futureContractField"] = true
+            }
+        }
+    }
+
+    func testResponseRejectsUnknownSuccessObjectFields() throws {
+        try assertResponseDecodingFails(makeRecognizedResponse()) { object in
+            var evidence = try XCTUnwrap(
+                object["packageEvidence"] as? [String: Any]
+            )
+            evidence["futureEvidenceField"] = true
+            object["packageEvidence"] = evidence
+        }
+        try assertResponseDecodingFails(makeRecognizedResponse()) { object in
+            var resolution = try XCTUnwrap(
+                object["canonicalResolution"] as? [String: Any]
+            )
+            resolution["futureResolutionField"] = true
+            object["canonicalResolution"] = resolution
+        }
+    }
+
+    func testResponseRejectsUnknownFieldsInNestedArrayElements() throws {
+        try assertResponseDecodingFails(makeRecognizedResponse()) { object in
+            var candidates = try XCTUnwrap(
+                object["candidates"] as? [[String: Any]]
+            )
+            candidates[0]["futureCandidateField"] = true
+            object["candidates"] = candidates
+        }
+        try assertResponseDecodingFails(makeRecognizedResponse()) { object in
+            var candidates = try XCTUnwrap(
+                object["candidates"] as? [[String: Any]]
+            )
+            var matches = try XCTUnwrap(
+                candidates[0]["exactEvidence"] as? [[String: Any]]
+            )
+            matches[0]["futureMatchField"] = true
+            candidates[0]["exactEvidence"] = matches
+            object["candidates"] = candidates
+        }
+        try assertResponseDecodingFails(makeRecognizedResponse()) { object in
+            var observations = try XCTUnwrap(
+                object["unresolvedEvidence"] as? [[String: Any]]
+            )
+            observations[0]["futureObservationField"] = true
+            object["unresolvedEvidence"] = observations
+        }
+    }
+
+    func testResponseRetainsStrictRequiredTypeAndEnumDecoding() throws {
+        try assertResponseDecodingFails(makeRecognizedResponse()) { object in
+            object.removeValue(forKey: "apiVersion")
+        }
+        try assertResponseDecodingFails(makeRecognizedResponse()) { object in
+            object["allowsLocalFallback"] = "false"
+        }
+        try assertResponseDecodingFails(makeRecognizedResponse()) { object in
+            object["status"] = "future_status"
+        }
+
+        let providerFailure = MedicineRecognitionAPIResponseDTO(
+            status: .providerUnavailable,
+            requestID: fixedRequestID,
+            packageEvidence: nil,
+            canonicalResolution: nil,
+            candidates: [],
+            unresolvedEvidence: [],
+            unresolvedReason: .providerUnavailable,
+            allowsLocalFallback: true,
+            errorCode: .providerUnavailable,
+            apiVersion: SlowWalkAPI.version
+        )
+        try assertResponseDecodingFails(providerFailure) { object in
+            object["errorCode"] = "FUTURE_PROVIDER_ERROR"
+        }
+    }
+
     func testResponseRejectsFallbackForSemanticOutcomes() throws {
         for status in [
             "recognized",
@@ -396,6 +492,35 @@ final class MedicineRecognitionDTOTests: XCTestCase {
             }
         }
         return []
+    }
+
+    private func assertResponseDecodingFails(
+        _ response: MedicineRecognitionAPIResponseDTO,
+        mutation: (inout [String: Any]) throws -> Void,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) throws {
+        let encoded = try SlowWalkJSONCoding.makeEncoder().encode(response)
+        var object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: encoded)
+                as? [String: Any],
+            file: file,
+            line: line
+        )
+        try mutation(&object)
+        let mutated = try JSONSerialization.data(
+            withJSONObject: object,
+            options: [.sortedKeys]
+        )
+
+        XCTAssertThrowsError(
+            try SlowWalkJSONCoding.makeDecoder().decode(
+                MedicineRecognitionAPIResponseDTO.self,
+                from: mutated
+            ),
+            file: file,
+            line: line
+        )
     }
 
     private var fixedRequestID: UUID {

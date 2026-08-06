@@ -263,7 +263,7 @@ struct RemoteMedicineRecognitionController: Sendable {
     ) throws -> Response {
         let mapping = providerFailureMapping(error)
         context.logger.warning(
-            "medicine_recognition_provider_unavailable",
+            "medicine_recognition_provider_failed",
             metadata: [
                 "slowwalk.api_request_id": .string(requestID.uuidString),
                 "slowwalk.error_code": .string(mapping.code.rawValue),
@@ -303,9 +303,9 @@ struct RemoteMedicineRecognitionController: Sendable {
         }
         guard let error = error as? ZhipuVisionClientError else {
             return .init(
-                code: .providerUnavailable,
-                status: .serviceUnavailable,
-                allowsFallback: true
+                code: .invalidProviderResponse,
+                status: .badGateway,
+                allowsFallback: false
             )
         }
         switch error {
@@ -333,7 +333,7 @@ struct RemoteMedicineRecognitionController: Sendable {
             return .init(
                 code: .invalidProviderResponse,
                 status: .badGateway,
-                allowsFallback: true
+                allowsFallback: false
             )
         }
     }

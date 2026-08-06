@@ -249,7 +249,6 @@ public struct OnlineMedicineRecognitionResponseMapper: Sendable {
               response.candidates.isEmpty,
               response.unresolvedEvidence.isEmpty,
               response.unresolvedReason == .providerUnavailable,
-              response.allowsLocalFallback,
               let errorCode = response.errorCode
         else {
             throw OnlineMedicineRecognitionFailure.invalidResponse
@@ -257,11 +256,25 @@ public struct OnlineMedicineRecognitionResponseMapper: Sendable {
 
         switch errorCode {
         case .providerRateLimited:
+            guard response.allowsLocalFallback else {
+                throw OnlineMedicineRecognitionFailure.invalidResponse
+            }
             return .rateLimited
         case .providerTimeout:
+            guard response.allowsLocalFallback else {
+                throw OnlineMedicineRecognitionFailure.invalidResponse
+            }
             return .timeout
-        case .providerUnavailable, .invalidProviderResponse:
+        case .providerUnavailable:
+            guard response.allowsLocalFallback else {
+                throw OnlineMedicineRecognitionFailure.invalidResponse
+            }
             return .providerUnavailable
+        case .invalidProviderResponse:
+            guard !response.allowsLocalFallback else {
+                throw OnlineMedicineRecognitionFailure.invalidResponse
+            }
+            return .invalidResponse
         default:
             throw OnlineMedicineRecognitionFailure.invalidResponse
         }

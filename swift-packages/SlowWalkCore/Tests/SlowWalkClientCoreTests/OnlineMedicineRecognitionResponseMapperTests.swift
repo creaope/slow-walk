@@ -910,12 +910,11 @@ final class OnlineMedicineRecognitionResponseMapperTests: XCTestCase {
         )
     }
 
-    func testProviderFailuresMapExactly() {
+    func testRecoverableProviderFailuresMapExactly() {
         let cases: [(APIErrorCode, OnlineMedicineRecognitionFailure)] = [
             (.providerRateLimited, .rateLimited),
             (.providerTimeout, .timeout),
             (.providerUnavailable, .providerUnavailable),
-            (.invalidProviderResponse, .providerUnavailable),
         ]
 
         for (errorCode, expectedFailure) in cases {
@@ -924,6 +923,23 @@ final class OnlineMedicineRecognitionResponseMapperTests: XCTestCase {
                 response: makeProviderResponse(errorCode: errorCode)
             )
         }
+    }
+
+    func testInvalidProviderResponseFailsClosed() {
+        assertFailure(
+            .invalidResponse,
+            response: makeProviderResponse(
+                allowsLocalFallback: false,
+                errorCode: .invalidProviderResponse
+            )
+        )
+        assertFailure(
+            .invalidResponse,
+            response: makeProviderResponse(
+                allowsLocalFallback: true,
+                errorCode: .invalidProviderResponse
+            )
+        )
     }
 
     func testProviderFailureRejectsSemanticOrFallbackMismatch() {

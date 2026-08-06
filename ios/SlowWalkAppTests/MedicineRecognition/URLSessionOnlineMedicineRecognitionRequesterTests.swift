@@ -401,7 +401,7 @@ struct URLSessionOnlineMedicineRecognitionRequesterTests {
         #expect(await waitForStopCount(1))
     }
 
-    @Test func mapsValidated429AndGeneric5xxWithoutRetry() async {
+    @Test func mapsValidated429AndFailsClosedForUntrusted5xx() async {
         let requestID = testUUID(5)
         let cases: [(
             Int,
@@ -418,7 +418,7 @@ struct URLSessionOnlineMedicineRecognitionRequesterTests {
                 ),
                 .rateLimited
             ),
-            (500, Data("provider-secret-body".utf8), .serverUnavailable),
+            (500, Data("provider-secret-body".utf8), .invalidResponse),
         ]
         for (statusCode, responseBody, expectedFailure) in cases {
             MockMedicineRecognitionURLProtocol.install { _, transport in
@@ -450,19 +450,21 @@ struct URLSessionOnlineMedicineRecognitionRequesterTests {
         let cases: [(
             Int,
             APIErrorCode,
+            Bool,
             OnlineMedicineRecognitionFailure
         )] = [
-            (429, .providerRateLimited, .rateLimited),
-            (502, .invalidProviderResponse, .providerUnavailable),
-            (503, .providerUnavailable, .providerUnavailable),
-            (504, .providerTimeout, .timeout),
+            (429, .providerRateLimited, true, .rateLimited),
+            (502, .invalidProviderResponse, false, .invalidResponse),
+            (503, .providerUnavailable, true, .providerUnavailable),
+            (504, .providerTimeout, true, .timeout),
         ]
 
-        for (statusCode, errorCode, expectedFailure) in cases {
+        for (statusCode, errorCode, allowsFallback, expectedFailure) in cases {
             let responseData = encodedResponse(
                 providerResponse(
                     requestID: requestID,
-                    errorCode: errorCode
+                    errorCode: errorCode,
+                    allowsLocalFallback: allowsFallback
                 )
             )
             MockMedicineRecognitionURLProtocol.install { _, transport in
@@ -483,10 +485,373 @@ struct URLSessionOnlineMedicineRecognitionRequesterTests {
         }
     }
 
+    @Test func invalidProviderResponseCannotEnterCoreLocalFallback()
+        async throws
+    {
+        let requestID = testUUID(61)
+        let responseData = encodedResponse(
+            providerResponse(
+                requestID: requestID,
+                errorCode: .invalidProviderResponse,
+                allowsLocalFallback: false
+            )
+        )
+        MockMedicineRecognitionURLProtocol.install { _, transport in
+            transport.complete(statusCode: 502, data: responseData)
+        }
+        let localRecognizer = RequesterFallbackTextRecognizerSpy()
+        let router = RemoteFirstMedicineRecognitionRouter(
+            remoteRequester: makeRequester(),
+            localRecognizer: localRecognizer,
+            localMapper: MedicineRecognitionInputMapper(
+                configuration: try MedicineRecognitionMappingConfiguration(
+                    minimumConfidence: 0.5,
+                    lowConfidenceHandling: .discard
+                )
+            )
+        )
+
+        do {
+            _ = try await router.recognize(
+                imageInput: makeRequest(requestID: requestID).image,
+                requestID: requestID,
+                mode: .remotePreferred
+            )
+            Issue.record("expected invalid provider response")
+        } catch let failure as OnlineMedicineRecognitionFailure {
+            #expect(failure == .invalidResponse)
+        } catch {
+            Issue.record("unexpected error: \(type(of: error))")
+        }
+
+        #expect(await localRecognizer.callCount == 0)
+    }
+
+    @Test func enforcesHTTPErrorContractsAcrossProductionRoutingStack()
+        async throws
+    {
+        struct ContractCase {
+            let name: String
+            let statusCode: Int
+            let body: Data
+            let headers: [String: String]
+            let expectedFallbackReason: MedicineRecognitionFallbackReason?
+        }
+
+        let requestID = testUUID(62)
+        let invalidProvider = encodedResponse(
+            providerResponse(
+                requestID: requestID,
+                errorCode: .invalidProviderResponse,
+                allowsLocalFallback: false
+            )
+        )
+        let recoverableProvider = encodedResponse(
+            providerResponse(
+                requestID: requestID,
+                errorCode: .providerUnavailable,
+                allowsLocalFallback: true
+            )
+        )
+        let recoverableRateLimit = encodedResponse(
+            providerResponse(
+                requestID: requestID,
+                errorCode: .providerRateLimited,
+                allowsLocalFallback: true
+            )
+        )
+        let recoverableTimeout = encodedResponse(
+            providerResponse(
+                requestID: requestID,
+                errorCode: .providerTimeout,
+                allowsLocalFallback: true
+            )
+        )
+        let cases = [
+            ContractCase(
+                name: "500 invalid provider response",
+                statusCode: 500,
+                body: invalidProvider,
+                headers: [:],
+                expectedFallbackReason: nil
+            ),
+            ContractCase(
+                name: "503 invalid provider response",
+                statusCode: 503,
+                body: invalidProvider,
+                headers: [:],
+                expectedFallbackReason: nil
+            ),
+            ContractCase(
+                name: "502 invalid provider response with fallback",
+                statusCode: 502,
+                body: encodedResponse(
+                    providerResponse(
+                        requestID: requestID,
+                        errorCode: .invalidProviderResponse,
+                        allowsLocalFallback: true
+                    )
+                ),
+                headers: [:],
+                expectedFallbackReason: nil
+            ),
+            ContractCase(
+                name: "500 malformed JSON",
+                statusCode: 500,
+                body: Data("not-json".utf8),
+                headers: [:],
+                expectedFallbackReason: nil
+            ),
+            ContractCase(
+                name: "599 unknown API code",
+                statusCode: 599,
+                body: responseData(
+                    providerResponse(
+                        requestID: requestID,
+                        errorCode: .providerUnavailable,
+                        allowsLocalFallback: true
+                    ),
+                    mutation: .string(
+                        key: "errorCode",
+                        value: "FUTURE_PROVIDER_ERROR"
+                    )
+                ),
+                headers: [:],
+                expectedFallbackReason: nil
+            ),
+            ContractCase(
+                name: "503 recoverable provider unavailable",
+                statusCode: 503,
+                body: recoverableProvider,
+                headers: [:],
+                expectedFallbackReason: .providerUnavailable
+            ),
+            ContractCase(
+                name: "400 provider unavailable status mismatch",
+                statusCode: 400,
+                body: recoverableProvider,
+                headers: [:],
+                expectedFallbackReason: nil
+            ),
+            ContractCase(
+                name: "429 recoverable rate limit",
+                statusCode: 429,
+                body: recoverableRateLimit,
+                headers: [:],
+                expectedFallbackReason: .rateLimited
+            ),
+            ContractCase(
+                name: "429 rate limit fallback disabled",
+                statusCode: 429,
+                body: encodedResponse(
+                    providerResponse(
+                        requestID: requestID,
+                        errorCode: .providerRateLimited,
+                        allowsLocalFallback: false
+                    )
+                ),
+                headers: [:],
+                expectedFallbackReason: nil
+            ),
+            ContractCase(
+                name: "429 rate limit fallback missing",
+                statusCode: 429,
+                body: responseData(
+                    providerResponse(
+                        requestID: requestID,
+                        errorCode: .providerRateLimited,
+                        allowsLocalFallback: true
+                    ),
+                    mutation: .removing(key: "allowsLocalFallback")
+                ),
+                headers: [:],
+                expectedFallbackReason: nil
+            ),
+            ContractCase(
+                name: "504 recoverable timeout",
+                statusCode: 504,
+                body: recoverableTimeout,
+                headers: [:],
+                expectedFallbackReason: .timeout
+            ),
+            ContractCase(
+                name: "504 timeout fallback disabled",
+                statusCode: 504,
+                body: encodedResponse(
+                    providerResponse(
+                        requestID: requestID,
+                        errorCode: .providerTimeout,
+                        allowsLocalFallback: false
+                    )
+                ),
+                headers: [:],
+                expectedFallbackReason: nil
+            ),
+            ContractCase(
+                name: "200 error DTO",
+                statusCode: 200,
+                body: recoverableProvider,
+                headers: [:],
+                expectedFallbackReason: nil
+            ),
+            ContractCase(
+                name: "500 non-JSON content type",
+                statusCode: 500,
+                body: invalidProvider,
+                headers: ["Content-Type": "text/plain"],
+                expectedFallbackReason: nil
+            ),
+            ContractCase(
+                name: "500 empty body",
+                statusCode: 500,
+                body: Data(),
+                headers: [:],
+                expectedFallbackReason: nil
+            ),
+            ContractCase(
+                name: "500 declared oversized body",
+                statusCode: 500,
+                body: Data(),
+                headers: [
+                    "Content-Length": String(
+                        URLSessionOnlineMedicineRecognitionRequester
+                            .maximumResponseBytes + 1
+                    ),
+                ],
+                expectedFallbackReason: nil
+            ),
+            ContractCase(
+                name: "503 unknown response field",
+                statusCode: 503,
+                body: responseData(
+                    providerResponse(
+                        requestID: requestID,
+                        errorCode: .providerUnavailable,
+                        allowsLocalFallback: true
+                    ),
+                    mutation: .boolean(key: "futureContractField")
+                ),
+                headers: [:],
+                expectedFallbackReason: nil
+            ),
+            ContractCase(
+                name: "503 API version mismatch",
+                statusCode: 503,
+                body: encodedResponse(
+                    providerResponse(
+                        requestID: requestID,
+                        errorCode: .providerUnavailable,
+                        apiVersion: "v2",
+                        allowsLocalFallback: true
+                    )
+                ),
+                headers: [:],
+                expectedFallbackReason: nil
+            ),
+            ContractCase(
+                name: "503 request ID mismatch",
+                statusCode: 503,
+                body: encodedResponse(
+                    providerResponse(
+                        requestID: testUUID(63),
+                        errorCode: .providerUnavailable,
+                        allowsLocalFallback: true
+                    )
+                ),
+                headers: [:],
+                expectedFallbackReason: nil
+            ),
+        ]
+
+        for testCase in cases {
+            MockMedicineRecognitionURLProtocol.install { _, transport in
+                transport.complete(
+                    statusCode: testCase.statusCode,
+                    data: testCase.body,
+                    headers: testCase.headers
+                )
+            }
+            let localRecognizer = RequesterFallbackTextRecognizerSpy()
+            let router = RemoteFirstMedicineRecognitionRouter(
+                remoteRequester: makeRequester(),
+                localRecognizer: localRecognizer,
+                localMapper: MedicineRecognitionInputMapper(
+                    configuration:
+                        try MedicineRecognitionMappingConfiguration(
+                            minimumConfidence: 0.5,
+                            lowConfidenceHandling: .discard
+                        )
+                )
+            )
+
+            if let expectedReason = testCase.expectedFallbackReason {
+                let outcome = try await router.recognize(
+                    imageInput: makeRequest(requestID: requestID).image,
+                    requestID: requestID,
+                    mode: .remotePreferred
+                )
+                #expect(
+                    outcome.source == .localFallback,
+                    "\(testCase.name) must use local fallback"
+                )
+                #expect(
+                    outcome.fallbackReason == expectedReason,
+                    "\(testCase.name) must preserve its fallback reason"
+                )
+                #expect(
+                    await localRecognizer.callCount == 1,
+                    "\(testCase.name) must call the local recognizer once"
+                )
+            } else {
+                do {
+                    let outcome = try await router.recognize(
+                        imageInput: makeRequest(requestID: requestID).image,
+                        requestID: requestID,
+                        mode: .remotePreferred
+                    )
+                    Issue.record(
+                        "\(testCase.name) unexpectedly returned \(outcome.source)"
+                    )
+                } catch let failure as OnlineMedicineRecognitionFailure {
+                    #expect(
+                        failure == .invalidResponse,
+                        "\(testCase.name) must fail closed"
+                    )
+                } catch {
+                    Issue.record(
+                        "\(testCase.name) returned \(type(of: error))"
+                    )
+                }
+                #expect(
+                    await localRecognizer.callCount == 0,
+                    "\(testCase.name) must not call the local recognizer"
+                )
+            }
+        }
+    }
+
     @Test func rejectsMalformedAndMismatchedGatewayResponses() async {
         let requestID = testUUID(7)
+        let unknownErrorResponse = Data(
+            String(
+                decoding: encodedResponse(
+                    providerResponse(
+                        requestID: requestID,
+                        errorCode: .invalidProviderResponse,
+                        allowsLocalFallback: false
+                    )
+                ),
+                as: UTF8.self
+            )
+            .replacingOccurrences(
+                of: APIErrorCode.invalidProviderResponse.rawValue,
+                with: "FUTURE_UNKNOWN_PROVIDER_ERROR"
+            )
+            .utf8
+        )
         let cases: [(Int, Data)] = [
             (503, Data("not-json".utf8)),
+            (502, unknownErrorResponse),
             (
                 429,
                 encodedResponse(
@@ -1241,7 +1606,8 @@ nonisolated private func noCandidateResponse(
 nonisolated private func providerResponse(
     requestID: UUID,
     errorCode: APIErrorCode,
-    apiVersion: String = SlowWalkAPI.version
+    apiVersion: String = SlowWalkAPI.version,
+    allowsLocalFallback: Bool = true
 ) -> MedicineRecognitionAPIResponseDTO {
     MedicineRecognitionAPIResponseDTO(
         status: .providerUnavailable,
@@ -1251,10 +1617,48 @@ nonisolated private func providerResponse(
         candidates: [],
         unresolvedEvidence: [],
         unresolvedReason: .providerUnavailable,
-        allowsLocalFallback: true,
+        allowsLocalFallback: allowsLocalFallback,
         errorCode: errorCode,
         apiVersion: apiVersion
     )
+}
+
+nonisolated private enum TopLevelResponseMutation: Sendable {
+    case string(key: String, value: String)
+    case boolean(key: String)
+    case removing(key: String)
+}
+
+nonisolated private func responseData(
+    _ response: MedicineRecognitionAPIResponseDTO,
+    mutation: TopLevelResponseMutation
+) -> Data {
+    var object = try! JSONSerialization.jsonObject(
+        with: encodedResponse(response)
+    ) as! [String: Any]
+    switch mutation {
+    case .string(let key, let value):
+        object[key] = value
+    case .boolean(let key):
+        object[key] = true
+    case .removing(let key):
+        object.removeValue(forKey: key)
+    }
+    return try! JSONSerialization.data(
+        withJSONObject: object,
+        options: [.sortedKeys]
+    )
+}
+
+private actor RequesterFallbackTextRecognizerSpy: MedicineTextRecognizing {
+    private(set) var callCount = 0
+
+    func recognizeText(
+        in input: OCRImageInput
+    ) async throws -> [RecognizedTextObservation] {
+        callCount += 1
+        return []
+    }
 }
 
 nonisolated private func readableEvidence()

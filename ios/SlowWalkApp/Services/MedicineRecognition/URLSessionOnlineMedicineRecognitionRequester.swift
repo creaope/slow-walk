@@ -150,16 +150,12 @@ nonisolated final class URLSessionOnlineMedicineRecognitionRequester:
                 response: httpResponse,
                 request: request
             )
-        case 429, 502, 503, 504:
-            return try decodeAndMapGatewayFailure(
+        default:
+            return try decodeAndMapHTTPFailure(
                 data,
                 response: httpResponse,
                 request: request
             )
-        case 500 ..< 600:
-            throw OnlineMedicineRecognitionFailure.serverUnavailable
-        default:
-            throw OnlineMedicineRecognitionFailure.invalidResponse
         }
     }
 
@@ -192,28 +188,40 @@ nonisolated final class URLSessionOnlineMedicineRecognitionRequester:
         return try map(responseDTO, for: request)
     }
 
-    private func decodeAndMapGatewayFailure(
+    private func decodeAndMapHTTPFailure(
         _ data: Data,
         response: HTTPURLResponse,
         request: OnlineMedicineRecognitionRequest
     ) throws -> OnlineMedicineRecognitionResult {
         try Task.checkCancellation()
-        guard hasJSONContentType(response),
-              let responseDTO = try? SlowWalkJSONCoding.makeDecoder().decode(
+        guard hasJSONContentType(response) else {
+            throw OnlineMedicineRecognitionFailure.invalidResponse
+        }
+        let responseDTO: MedicineRecognitionAPIResponseDTO
+        do {
+            responseDTO = try SlowWalkJSONCoding.makeDecoder().decode(
                 MedicineRecognitionAPIResponseDTO.self,
                 from: data
-              ),
-              responseDTO.status == .providerUnavailable,
-              responseDTO.errorCode == expectedProviderErrorCode(
-                for: response.statusCode
-              )
-        else {
+            )
+        } catch {
             if Task.isCancelled {
                 throw CancellationError()
             }
             throw OnlineMedicineRecognitionFailure.invalidResponse
         }
         try Task.checkCancellation()
+        guard responseDTO.requestID == request.requestID,
+              responseDTO.apiVersion == SlowWalkAPI.version,
+              responseDTO.status == .providerUnavailable,
+              let contract = providerFailureContract(
+                for: response.statusCode
+              ),
+              responseDTO.errorCode == contract.errorCode,
+              responseDTO.allowsLocalFallback
+                == contract.allowsLocalFallback
+        else {
+            throw OnlineMedicineRecognitionFailure.invalidResponse
+        }
         return try map(responseDTO, for: request)
     }
 
@@ -291,15 +299,7 @@ nonisolated final class URLSessionOnlineMedicineRecognitionRequester:
             bytes.task.cancel()
             throw CancellationError()
         }
-
-        switch httpResponse.statusCode {
-        case 200, 429, 502, 503, 504:
-            break
-        case 500 ..< 600:
-            bytes.task.cancel()
-            try Task.checkCancellation()
-            throw OnlineMedicineRecognitionFailure.serverUnavailable
-        default:
+        guard hasJSONContentType(httpResponse) else {
             bytes.task.cancel()
             try Task.checkCancellation()
             throw OnlineMedicineRecognitionFailure.invalidResponse
@@ -370,18 +370,18 @@ nonisolated final class URLSessionOnlineMedicineRecognitionRequester:
         }
     }
 
-    private func expectedProviderErrorCode(
+    private func providerFailureContract(
         for statusCode: Int
-    ) -> APIErrorCode? {
+    ) -> (errorCode: APIErrorCode, allowsLocalFallback: Bool)? {
         switch statusCode {
         case 429:
-            .providerRateLimited
+            (.providerRateLimited, true)
         case 502:
-            .invalidProviderResponse
+            (.invalidProviderResponse, false)
         case 503:
-            .providerUnavailable
+            (.providerUnavailable, true)
         case 504:
-            .providerTimeout
+            (.providerTimeout, true)
         default:
             nil
         }
