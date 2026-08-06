@@ -20,7 +20,10 @@ enum UserProfileSessionFailure:
     case loadFailed
     case saveFailed
     case deleteFailed
+    case invalidStoredProfile
     case invalidBundledDemoProfile
+    case profileAlreadyExists
+    case profileStateUnresolved
     case noCurrentProfile
     case operationInProgress
 
@@ -32,8 +35,14 @@ enum UserProfileSessionFailure:
             "saveFailed"
         case .deleteFailed:
             "deleteFailed"
+        case .invalidStoredProfile:
+            "invalidStoredProfile"
         case .invalidBundledDemoProfile:
             "invalidBundledDemoProfile"
+        case .profileAlreadyExists:
+            "profileAlreadyExists"
+        case .profileStateUnresolved:
+            "profileStateUnresolved"
         case .noCurrentProfile:
             "noCurrentProfile"
         case .operationInProgress:
@@ -77,7 +86,7 @@ final class UserProfileSession {
     }
 
     func create(from draft: UserProfileDraft) async throws {
-        try ensureOperationCanBegin()
+        try ensureProfileCreationCanBegin()
 
         let id = uuidProvider.makeUUID()
         let now = clock.now()
@@ -97,36 +106,62 @@ final class UserProfileSession {
             throw UserProfileSessionFailure.noCurrentProfile
         }
 
-        let now = clock.now()
+        var effectiveUpdatedAt = clock.now()
+        effectiveUpdatedAt = max(
+            effectiveUpdatedAt,
+            existingProfile.updatedAt
+        )
+        effectiveUpdatedAt = max(
+            effectiveUpdatedAt,
+            existingProfile.healthProfile.updatedAt
+        )
+        effectiveUpdatedAt = max(
+            effectiveUpdatedAt,
+            existingProfile.createdAt
+        )
+        effectiveUpdatedAt = max(
+            effectiveUpdatedAt,
+            existingProfile.healthProfile.createdAt
+        )
         let validatedProfile = try validator.validate(
             draft,
             id: existingProfile.healthProfile.id,
             createdAt: existingProfile.healthProfile.createdAt,
-            updatedAt: now
+            updatedAt: effectiveUpdatedAt
+        )
+        let updatedHealthProfile = UserHealthProfile(
+            id: existingProfile.healthProfile.id,
+            age: validatedProfile.healthProfile.age,
+            allergies: existingProfile.healthProfile.allergies,
+            diagnosedConditions:
+                validatedProfile.healthProfile.diagnosedConditions,
+            currentMedicineIngredientIDs:
+                existingProfile.healthProfile.currentMedicineIngredientIDs,
+            bodyMetrics: existingProfile.healthProfile.bodyMetrics,
+            updatedAt: effectiveUpdatedAt,
+            createdAt: existingProfile.healthProfile.createdAt,
+            schemaVersion: existingProfile.healthProfile.schemaVersion
         )
         let updatedProfile = LocalUserProfileBundle(
-            schemaVersion: validatedProfile.schemaVersion,
+            schemaVersion: LocalUserProfileBundle.currentSchemaVersion,
             source: .userEnteredLocal,
             preferredName: validatedProfile.preferredName,
-            healthProfile: validatedProfile.healthProfile,
+            healthProfile: updatedHealthProfile,
             unresolvedAllergyDescriptions:
                 validatedProfile.unresolvedAllergyDescriptions,
             unresolvedMedicineNames:
                 validatedProfile.unresolvedMedicineNames,
             createdAt: existingProfile.createdAt,
-            updatedAt: validatedProfile.updatedAt
+            updatedAt: effectiveUpdatedAt
         )
 
         try await save(updatedProfile)
     }
 
     func useBundledDemoProfile() async throws {
-        try ensureOperationCanBegin()
+        try ensureProfileCreationCanBegin()
         guard bundledDemoProfile.source == .bundledDemo,
-              bundledDemoProfile.schemaVersion
-                == LocalUserProfileBundle.currentSchemaVersion,
-              bundledDemoProfile.healthProfile.schemaVersion
-                == UserHealthProfile.currentSchemaVersion
+              hasCurrentSchema(bundledDemoProfile)
         else {
             state = .failed(.invalidBundledDemoProfile)
             throw UserProfileSessionFailure.invalidBundledDemoProfile
@@ -154,12 +189,56 @@ final class UserProfileSession {
 
         do {
             if let profile = try await store.loadCurrentProfile() {
-                state = .ready(profile)
+                if hasCurrentSchema(profile) {
+                    state = .ready(profile)
+                } else {
+                    state = .failed(.invalidStoredProfile)
+                }
             } else {
                 state = .needsOnboarding
             }
         } catch {
-            state = .failed(.loadFailed)
+            state = .failed(loadFailure(for: error))
+        }
+    }
+
+    private func loadFailure(
+        for error: any Error
+    ) -> UserProfileSessionFailure {
+        guard let storeError = error as? ProtectedLocalUserProfileStoreError
+        else {
+            return .loadFailed
+        }
+
+        switch storeError {
+        case .unsupportedSchemaVersion:
+            return .invalidStoredProfile
+        default:
+            return .loadFailed
+        }
+    }
+
+    private func hasCurrentSchema(
+        _ profile: LocalUserProfileBundle
+    ) -> Bool {
+        profile.schemaVersion
+            == LocalUserProfileBundle.currentSchemaVersion
+            && profile.healthProfile.schemaVersion
+                == UserHealthProfile.currentSchemaVersion
+    }
+
+    private func ensureProfileCreationCanBegin() throws {
+        try ensureOperationCanBegin()
+
+        switch state {
+        case .needsOnboarding:
+            return
+        case .ready:
+            throw UserProfileSessionFailure.profileAlreadyExists
+        case .idle, .failed:
+            throw UserProfileSessionFailure.profileStateUnresolved
+        case .loading:
+            throw UserProfileSessionFailure.operationInProgress
         }
     }
 
