@@ -83,26 +83,12 @@ struct CompanionView: View {
     private func assessmentPage(
         _ gate: MedicineAssessmentGate
     ) -> some View {
-        let displayState = MedicineStateMapper.map(
-            gate.assessmentState,
-            demoDisclaimer: CompanionCopy.demoDataNotice
+        let page = AssessmentPagePresentation(gate.assessmentState)
+
+        return assessmentPresentation(
+            gate: gate,
+            displayState: page.displayState
         )
-
-        return VStack(spacing: 0) {
-            // Action cards render the mapped disclaimer themselves. States
-            // without a card keep the app-level banner, so every assessment
-            // page carries exactly one clear demo-data notice.
-            if displayState.actionCard == nil {
-                DemoDataBanner()
-                    .padding(.horizontal, 20)
-                    .padding(.top, 20)
-            }
-
-            assessmentPresentation(
-                gate: gate,
-                displayState: displayState
-            )
-        }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             assessmentActions(gate)
         }
@@ -190,6 +176,22 @@ struct CompanionView: View {
     ) -> Bool {
         guard case let .failed(failure) = state else { return false }
         return failure.isRecoverable
+    }
+
+    /// The Presentation package is the sole demo-disclaimer owner for every
+    /// medicine assessment state. The App does not add a second banner.
+    struct AssessmentPagePresentation: Equatable {
+        let displayState: MedicineDisplayState
+
+        init(
+            _ state: MedicineAssessmentViewState,
+            demoDisclaimer: String? = CompanionCopy.demoDataNotice
+        ) {
+            displayState = MedicineStateMapper.map(
+                state,
+                demoDisclaimer: demoDisclaimer
+            )
+        }
     }
 
     struct CanonicalCandidateConfirmation: Equatable {

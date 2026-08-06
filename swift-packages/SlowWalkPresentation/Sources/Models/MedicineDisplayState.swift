@@ -70,6 +70,29 @@ public struct MedicineFailureDisplay:
     }
 }
 
+/// Canonical recognition evidence shown above the medicine assessment.
+///
+/// Both values come directly from the current coordinator state. Presentation
+/// never re-runs OCR, guesses a medicine name, or keeps the original image.
+public struct MedicineRecognitionDisplay:
+    Sendable,
+    Equatable
+{
+    /// Text observations retained by the canonical recognition input/response.
+    public let recognizedTexts: [String]
+
+    /// The medicine selected by canonical resolution, when one exists.
+    public let resolvedMedicineName: String?
+
+    public init(
+        recognizedTexts: [String],
+        resolvedMedicineName: String?
+    ) {
+        self.recognizedTexts = recognizedTexts
+        self.resolvedMedicineName = resolvedMedicineName
+    }
+}
+
 /// The complete input a medicine view needs.
 ///
 /// There is no second medical rule set, risk scale, or API DTO here. The
@@ -88,6 +111,10 @@ public struct MedicineDisplayState:
 
     /// Present only for `timeout` and `failed`.
     public let failure: MedicineFailureDisplay?
+
+    /// OCR evidence and the resolved medicine name from the canonical state.
+    /// `nil` while no recognition evidence is available.
+    public let recognition: MedicineRecognitionDisplay?
 
     /// True when the canonical coordinator state is
     /// `requiresMedicineConfirmation`.
@@ -109,12 +136,14 @@ public struct MedicineDisplayState:
         variant: MedicineDisplayVariant,
         actionCard: ActionCard?,
         failure: MedicineFailureDisplay?,
+        recognition: MedicineRecognitionDisplay? = nil,
         requiresMedicineConfirmation: Bool,
         demoDisclaimer: String? = nil
     ) {
         self.variant = variant
         self.actionCard = actionCard
         self.failure = failure
+        self.recognition = recognition
         self.requiresMedicineConfirmation =
             requiresMedicineConfirmation
         self.demoDisclaimer = demoDisclaimer

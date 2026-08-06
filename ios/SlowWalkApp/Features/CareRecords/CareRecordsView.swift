@@ -14,51 +14,54 @@ struct CareRecordsView: View {
 
     var body: some View {
         List {
-            Section {
-                DemoDataBanner()
-                    .slowWalkReadableContent()
-            }
-
             if events.isEmpty {
                 Section {
                     ContentUnavailableView(
                         "还没有记录",
                         systemImage: "clock.badge.questionmark",
-                        description: Text("开始一次陪伴之后，这里会按时间记录每一步。")
+                        description: Text(
+                            "开始一次陪伴之后，这里会按时间记录重要步骤。"
+                        )
                     )
                     .slowWalkReadableContent()
                 }
             } else {
-                Section("陪伴过程") {
+                Section {
                     ForEach(events) { event in
                         row(for: event)
                             .slowWalkReadableContent()
                     }
+                } header: {
+                    HStack {
+                        Text("陪伴过程")
+                        Spacer()
+                        Text("\(events.count) 条")
+                            .foregroundStyle(.secondary)
+                            .accessibilityLabel("共 \(events.count) 条记录")
+                    }
                 }
             }
 
-            Section("记录说明") {
-                Label {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("守护记录保存")
-                            .font(.headline)
-                        Text(persistenceStatus.shortLabel)
-                            .foregroundStyle(.secondary)
-                        if let detail = persistenceStatus.detail {
-                            Text(detail)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-                    }
-                } icon: {
-                    Image(systemName: "internaldrive")
-                        .foregroundStyle(.tint)
-                        .accessibilityHidden(true)
+            Section {
+                LabeledContent {
+                    Text(persistenceStatus.shortLabel)
+                        .foregroundStyle(.secondary)
+                } label: {
+                    Label("保存方式", systemImage: "internaldrive")
                 }
                 .accessibilityElement(children: .ignore)
                 .accessibilityLabel(persistenceStatus.summaryLine)
                 .slowWalkReadableContent()
+            } header: {
+                Text("记录保存")
+            } footer: {
+                VStack(alignment: .leading, spacing: 8) {
+                    if let detail = persistenceStatus.detail {
+                        Text(detail)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    DemoDataFooter()
+                }
             }
         }
         .listStyle(.insetGrouped)
@@ -69,11 +72,11 @@ struct CareRecordsView: View {
 
         return Label {
             VStack(alignment: .leading, spacing: 4) {
-                Text(time)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
                 Text(Self.description(for: event.kind))
                     .fixedSize(horizontal: false, vertical: true)
+                Text(time)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         } icon: {
@@ -82,7 +85,7 @@ struct CareRecordsView: View {
                 .accessibilityHidden(true)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("\(time)，\(Self.description(for: event.kind))")
+        .accessibilityLabel("\(Self.description(for: event.kind))，\(time)")
     }
 
     private static func systemImage(for kind: CareRecordEventKind) -> String {

@@ -6,11 +6,6 @@ struct SafetyInformationView: View {
 
     var body: some View {
         List {
-            Section {
-                DemoDataBanner()
-                    .slowWalkReadableContent()
-            }
-
             Section("使用边界") {
                 NotADiagnosisNotice()
                     .slowWalkReadableContent()

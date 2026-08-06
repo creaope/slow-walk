@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// The app's four top-level destinations.
+/// The app's three top-level destinations.
 ///
 /// Today comes first so the app opens on "what needs doing now" rather than a
 /// list of tools. Anti-fraud is deliberately not a top-level tab at this stage.
@@ -8,7 +8,6 @@ enum RootDestination: Hashable, CaseIterable, Identifiable {
     case today
     case companion
     case careRecords
-    case settings
 
     var id: Self { self }
 
@@ -17,7 +16,6 @@ enum RootDestination: Hashable, CaseIterable, Identifiable {
         case .today: "今天"
         case .companion: "陪伴"
         case .careRecords: "守护记录"
-        case .settings: "关怀设置"
         }
     }
 
@@ -26,14 +24,13 @@ enum RootDestination: Hashable, CaseIterable, Identifiable {
         case .today: "sun.max"
         case .companion: "figure.walk"
         case .careRecords: "list.bullet.rectangle"
-        case .settings: "gearshape"
         }
     }
 }
 
 struct RootTabView: View {
-    @Environment(AppEnvironment.self) private var environment
     @State private var selection: RootDestination = .today
+    @State private var isCareSettingsPresented = false
 
     var body: some View {
         // The iOS 18 `Tab` builder is deliberately not used: the app's
@@ -50,6 +47,20 @@ struct RootTabView: View {
                 .tag(destination)
             }
         }
+        .sheet(isPresented: $isCareSettingsPresented) {
+            NavigationStack {
+                CareSettingsView()
+                    .navigationTitle("关怀设置")
+                    .navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .confirmationAction) {
+                            Button("完成") {
+                                isCareSettingsPresented = false
+                            }
+                        }
+                    }
+            }
+        }
     }
 
     @ViewBuilder
@@ -57,12 +68,23 @@ struct RootTabView: View {
         switch destination {
         case .today:
             TodayView(onStartCompanion: { selection = .companion })
+                .toolbar {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        Button {
+                            isCareSettingsPresented = true
+                        } label: {
+                            Image(systemName: "person.crop.circle.fill")
+                                .font(.title2)
+                                .symbolRenderingMode(.hierarchical)
+                        }
+                        .accessibilityLabel("个人与设置")
+                        .accessibilityHint("打开个人信息与关怀设置。")
+                    }
+                }
         case .companion:
             CompanionView()
         case .careRecords:
             CareRecordsView()
-        case .settings:
-            CareSettingsView()
         }
     }
 }

@@ -37,16 +37,34 @@ public struct MedicineActionCardView: View {
     }
 
     public var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
+        Group {
             if let disclaimer = demoDisclaimer {
-                demoDisclaimerBanner(disclaimer)
+                Section {
+                    MedicineDemoDisclaimerRow(text: disclaimer)
+                }
             }
 
-            header
-            primaryInstruction
+            Section {
+                Text(actionCard.title)
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityAddTraits(.isHeader)
 
-            if actionCard.mustConfirmMedicine {
-                mustConfirmBadge
+                RiskLevelBadge(level: actionCard.riskLevel)
+
+                if actionCard.mustConfirmMedicine {
+                    mustConfirmRow
+                }
+            }
+
+            Section {
+                primaryInstructionRow
+            } header: {
+                sectionHeading(
+                    MedicinePresentationCopy
+                        .primaryInstructionHeading
+                )
             }
 
             if !actionCard.warnings.isEmpty {
@@ -65,169 +83,101 @@ public struct MedicineActionCardView: View {
         }
     }
 
-    // MARK: - Demo disclaimer
+    // MARK: - Must confirm medicine
 
-    /// Dedicated banner rendered only when the caller explicitly supplies a
-    /// demo disclaimer string.  Production assessments never pass one, so
-    /// real users never see a fake "DEMO" label.
-    private func demoDisclaimerBanner(
-        _ text: String
-    ) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "info.circle.fill")
-                .foregroundStyle(.secondary)
-                .accessibilityHidden(true)
-
-            Text(text)
-                .font(.footnote)
-                .fontWeight(.medium)
-                .fixedSize(horizontal: false, vertical: true)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(.secondary, lineWidth: 1)
-        }
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(text)
-        // The banner is its own accessibility element — never merged into
-        // a header, a hint, or a warning.
-    }
-
-    // MARK: - Must confirm medicine badge
-
-    /// Rendered only when the canonical `ActionCard.mustConfirmMedicine` is
-    /// `true`, independently of the coordinator-confirmation requirement.
-    /// The two signals are distinct: a card can require confirmation at any
-    /// risk level, and a confirmation can be required with no card at all.
-    private var mustConfirmBadge: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "person.text.rectangle.fill")
-                .accessibilityHidden(true)
-
+    private var mustConfirmRow: some View {
+        Label {
             Text(MedicinePresentationCopy.mustConfirmLabel)
                 .font(.subheadline)
                 .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "person.text.rectangle")
+                .accessibilityHidden(true)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .strokeBorder(.secondary, lineWidth: 1)
-        }
-        .accessibilityElement(children: .ignore)
+        .accessibilityElement(children: .combine)
         .accessibilityLabel(
             MedicinePresentationCopy.mustConfirmLabel
         )
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        // Grouped as one element without `.combine` on any container holding a
-        // control: this subtree has none.
-        VStack(alignment: .leading, spacing: 8) {
-            Text(actionCard.title)
-                .font(.title2)
-                .fontWeight(.semibold)
-                .fixedSize(
-                    horizontal: false,
-                    vertical: true
-                )
-                .accessibilityAddTraits(.isHeader)
-
-            RiskLevelBadge(level: actionCard.riskLevel)
-        }
-    }
-
     // MARK: - Primary instruction
 
-    private var primaryInstruction: some View {
-        Text(actionCard.primaryInstruction)
-            .font(.headline)
-            .fixedSize(horizontal: false, vertical: true)
-            .accessibilityLabel(
-                """
-                \(MedicinePresentationCopy
-                    .primaryInstructionHeading): \
-                \(actionCard.primaryInstruction)
-                """
-            )
+    private var primaryInstructionRow: some View {
+        Label {
+            Text(actionCard.primaryInstruction)
+                .font(.headline)
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "arrow.forward.circle")
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            """
+            \(MedicinePresentationCopy.primaryInstructionHeading): \
+            \(actionCard.primaryInstruction)
+            """
+        )
     }
 
     // MARK: - Warnings
 
     private var warningsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeading(
-                MedicinePresentationCopy.warningsHeading
-            )
-
+        Section {
             // Each canonical warning stays a separate element so VoiceOver
             // never merges two distinct warnings into one utterance.
             ForEach(
                 Array(actionCard.warnings.enumerated()),
                 id: \.offset
             ) { _, warning in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(
-                        systemName:
-                            "exclamationmark.triangle.fill"
-                    )
-                    .accessibilityHidden(true)
-
+                Label {
                     Text(warning)
-                        .fixedSize(
-                            horizontal: false,
-                            vertical: true
-                        )
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "exclamationmark.triangle")
+                        .accessibilityHidden(true)
                 }
                 .accessibilityElement(children: .combine)
             }
+        } header: {
+            sectionHeading(
+                MedicinePresentationCopy.warningsHeading
+            )
         }
     }
 
     // MARK: - Recommended actions
 
     private var recommendedActionsSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeading(
-                MedicinePresentationCopy
-                    .recommendedActionsHeading
-            )
-
+        Section {
             ForEach(
                 actionCard.recommendedActions,
                 id: \.rawValue
             ) { action in
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: "checklist")
-                        .accessibilityHidden(true)
-
+                Label {
                     Text(
                         MedicinePresentationCopy
                             .actionName(action)
                     )
-                    .fixedSize(
-                        horizontal: false,
-                        vertical: true
-                    )
+                    .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "checklist")
+                        .accessibilityHidden(true)
                 }
                 .accessibilityElement(children: .combine)
             }
+        } header: {
+            sectionHeading(
+                MedicinePresentationCopy
+                    .recommendedActionsHeading
+            )
         }
     }
 
     // MARK: - Source references
 
     private var sourceReferencesSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            sectionHeading(
-                MedicinePresentationCopy
-                    .sourceReferencesHeading
-            )
-
+        Section {
             if actionCard.sourceReferences.isEmpty {
                 Text(
                     MedicinePresentationCopy
@@ -263,30 +213,40 @@ public struct MedicineActionCardView: View {
                     .accessibilityElement(children: .combine)
                 }
             }
+        } header: {
+            sectionHeading(
+                MedicinePresentationCopy
+                    .sourceReferencesHeading
+            )
         }
     }
 
     // MARK: - Confirmation
 
     private var confirmationSection: some View {
-        // The heading is a sibling of the Button, never merged with it, so the
-        // Button stays an independent VoiceOver control.
-        VStack(alignment: .leading, spacing: 12) {
-            Text(
-                MedicinePresentationCopy
-                    .confirmationRequiredHeading
-            )
-            .font(.subheadline)
-            .fontWeight(.semibold)
-            .fixedSize(horizontal: false, vertical: true)
+        Section {
+            Label {
+                Text(
+                    MedicinePresentationCopy
+                        .confirmationRequiredHeading
+                )
+                .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "questionmark.circle")
+                    .accessibilityHidden(true)
+            }
+            .accessibilityElement(children: .combine)
 
             if let confirmAction {
-                Button(
-                    MedicinePresentationCopy
-                        .confirmMedicineButtonTitle,
-                    action: confirmAction
-                )
-                .buttonStyle(.bordered)
+                Button(action: confirmAction) {
+                    Label(
+                        MedicinePresentationCopy
+                            .confirmMedicineButtonTitle,
+                        systemImage: "checkmark.circle"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
                 .medicineMinimumHitTarget()
                 .accessibilityHint(
                     MedicinePresentationCopy
@@ -305,6 +265,26 @@ public struct MedicineActionCardView: View {
             .font(.subheadline)
             .fontWeight(.semibold)
             .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// Standard form row used wherever a caller supplies demo assessment data.
+struct MedicineDemoDisclaimerRow: View {
+    let text: String
+
+    var body: some View {
+        Label {
+            Text(text)
+                .font(.footnote)
+                .fontWeight(.medium)
+                .fixedSize(horizontal: false, vertical: true)
+        } icon: {
+            Image(systemName: "info.circle")
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(text)
     }
 }
 

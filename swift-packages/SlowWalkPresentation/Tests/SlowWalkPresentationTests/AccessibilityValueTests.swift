@@ -192,6 +192,7 @@ final class AccessibilityValueTests: XCTestCase {
 
     func test_sectionHeadings_areDistinct() {
         let headings: Set<String> = [
+            MedicinePresentationCopy.recognitionHeading,
             MedicinePresentationCopy.riskLevelHeading,
             MedicinePresentationCopy
                 .primaryInstructionHeading,
@@ -203,8 +204,8 @@ final class AccessibilityValueTests: XCTestCase {
             MedicinePresentationCopy
                 .confirmationRequiredHeading,
         ]
-        // All six section headings exist and carry distinct text.
-        XCTAssertEqual(headings.count, 6)
+        // All seven section headings exist and carry distinct text.
+        XCTAssertEqual(headings.count, 7)
         for heading in headings {
             XCTAssertFalse(heading.isEmpty)
         }
@@ -297,6 +298,49 @@ final class AccessibilityValueTests: XCTestCase {
         )
     }
 
+    func test_assessmentView_prioritizesSafetyContentBeforeRecognition() throws {
+        let source = try assessmentViewSource()
+        let bodyEnd = try XCTUnwrap(
+            source.range(of: "// MARK: - Demo disclaimer")
+        )
+        let body = source[..<bodyEnd.lowerBound]
+        let disclaimer = try XCTUnwrap(
+            body.range(of: "demoDisclaimerSection")
+        )
+        let canonicalContent = try XCTUnwrap(
+            body.range(of: "content")
+        )
+        let recognition = try XCTUnwrap(
+            body.range(of: "recognitionSection")
+        )
+
+        XCTAssertLessThan(disclaimer.lowerBound, canonicalContent.lowerBound)
+        XCTAssertLessThan(canonicalContent.lowerBound, recognition.lowerBound)
+    }
+
+    func test_assessmentView_hasOneTopLevelDisclaimerRow() throws {
+        let source = try assessmentViewSource()
+        let row = "MedicineDemoDisclaimerRow(text: disclaimer)"
+        let occurrenceCount = source.components(separatedBy: row).count - 1
+
+        XCTAssertEqual(occurrenceCount, 1)
+    }
+
+    func test_recognitionEvidence_usesNativeDisclosure() throws {
+        let source = try assessmentViewSource()
+        let recognitionStart = try XCTUnwrap(
+            source.range(of: "private var recognitionSection")
+        )
+        let contentStart = try XCTUnwrap(
+            source.range(of: "private var content")
+        )
+        let recognitionSource = source[
+            recognitionStart.lowerBound ..< contentStart.lowerBound
+        ]
+
+        XCTAssertTrue(recognitionSource.contains("DisclosureGroup"))
+    }
+
     func test_idleAssessmentText_isLocalized() {
         let visibleText = MedicinePresentationCopy.idleText
 
@@ -368,6 +412,18 @@ final class AccessibilityValueTests: XCTestCase {
             \(violations.joined(separator: ", "))
             """
         )
+    }
+
+    private func assessmentViewSource() throws -> String {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("Sources")
+            .appendingPathComponent("Views")
+            .appendingPathComponent("MedicineAssessmentView.swift")
+
+        return try String(contentsOf: url, encoding: .utf8)
     }
 
     // MARK: - Failure names are all present
