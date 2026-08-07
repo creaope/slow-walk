@@ -71,6 +71,10 @@ struct MedicationReminderView: View {
                         .fixedSize(horizontal: false, vertical: true)
                 }
             }
+
+            Section {
+                DemoDataFooter()
+            }
         }
         .listStyle(.insetGrouped)
         .navigationTitle("用药提醒")

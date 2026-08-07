@@ -2044,6 +2044,179 @@ struct MedicineAssessmentGateTests {
     }
 }
 
+// MARK: - P2 minimal fix tests
+
+/// Verification for the two P2 fixes:
+/// 1. DemoDataFooter is present on companion hub, flow, and medication reminder pages.
+/// 2. `.notStarted` next-step copy no longer references a removed button.
+///
+/// Demo-annotation tests use the same source-verification pattern as the
+/// existing `assessmentPageDoesNotRenderAnAppLevelDemoBanner`: they read the
+/// production source and assert structural presence. SwiftUI `List` section
+/// footers are lazily rendered inside `UICollectionView` and are not reliably
+/// reachable through UIKit view-hierarchy traversal, so a smoke-host step
+/// confirms the hosting path does not crash, and source checks confirm the
+/// annotation is wired in at the right call sites.
+@MainActor
+struct CompanionP2FixTests {
+
+    // MARK: Source helpers
+
+    private static func companionViewSource() throws -> String {
+        try MedicineAssessmentGateTests.companionViewSource()
+    }
+
+    private static func medicationReminderViewSource() throws -> String {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("SlowWalkApp")
+            .appendingPathComponent("Features")
+            .appendingPathComponent("Companion")
+            .appendingPathComponent("MedicationReminderView.swift")
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    /// Returns the source range for the given computed property or function
+    /// body. Best-effort: looks for `var <name>` or `func <name>` followed
+    /// by the next declaration marker at the same indentation level.
+    private static func bodySource(
+        _ source: String,
+        for declaratorPattern: String
+    ) -> String {
+        guard let start = source.range(of: declaratorPattern) else {
+            return ""
+        }
+        let tail = source[start.upperBound...]
+        var accumulated = ""
+        for line in tail.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if accumulated.count > 4,
+               trimmed.hasPrefix("private "),
+               line.first?.isWhitespace == true,
+               line.prefix(5).allSatisfy({ $0 == " " }) {
+                break
+            }
+            if accumulated.count > 4,
+               line.first?.isWhitespace == true,
+               line.prefix(5).allSatisfy({ $0 == " " }),
+               (trimmed.hasPrefix("var ") || trimmed.hasPrefix("func ")
+                || trimmed.hasPrefix("case ") || trimmed.hasPrefix("@")
+                || trimmed.hasPrefix("// MARK:")) {
+                break
+            }
+            accumulated += String(line) + "\n"
+        }
+        return accumulated
+    }
+
+    // MARK: P2-1 Demo annotations — source verification
+
+    @Test func companionHubContainsDemoDataFooter() throws {
+        let source = try Self.companionViewSource()
+        let hubBody = Self.bodySource(
+            source,
+            for: "private var companionHubPage: some View {"
+        )
+        #expect(
+            hubBody.contains("DemoDataFooter()"),
+            "companion hub page must reference DemoDataFooter"
+        )
+    }
+
+    @Test func companionFlowPageContainsDemoDataFooter() throws {
+        let source = try Self.companionViewSource()
+        let flowBody = Self.bodySource(
+            source,
+            for: "private var companionFlowPage: some View {"
+        )
+        #expect(
+            flowBody.contains("DemoDataFooter()"),
+            "companion flow page must reference DemoDataFooter"
+        )
+    }
+
+    @Test func medicationReminderViewContainsDemoDataFooter() throws {
+        let source = try Self.medicationReminderViewSource()
+        #expect(
+            source.contains("DemoDataFooter()"),
+            "MedicationReminderView must reference DemoDataFooter"
+        )
+    }
+
+    @Test func companionAssessmentPageDoesNotAddDuplicateDemoBanner() throws {
+        let source = try Self.companionViewSource()
+        let assessmentBody = Self.bodySource(
+            source,
+            for: "private func assessmentPresentation("
+        )
+        #expect(
+            assessmentBody.contains("DemoDataFooter()") == false,
+            "assessment page must not duplicate the canonical demo disclaimer"
+        )
+    }
+
+    @Test func companionViewHasExactlyTwoDemoDataFooterReferences() throws {
+        let source = try Self.companionViewSource()
+        var count = 0
+        var search = source.startIndex
+        let needle = "DemoDataFooter()"
+        while let range = source[search...].range(of: needle) {
+            count += 1
+            search = range.upperBound
+        }
+        #expect(count == 2, "companion view must have exactly 2 DemoDataFooter references, found \(count)")
+    }
+
+    // MARK: P2-1 Demo annotations — smoke host
+
+    @Test func companionHubHostsWithoutCrash() {
+        let session = CompanionSessionModel(
+            records: RecordingCareRecordStore(),
+            plan: .demo,
+            capabilities: .phase0
+        )
+        let (_, controller) = MedicineAssessmentGateTests.host(
+            CompanionView(session: session)
+        )
+        #expect(controller.view != nil)
+    }
+
+    @Test func medicationReminderViewHostsWithoutCrash() {
+        let (_, controller) = MedicineAssessmentGateTests.host(
+            MedicationReminderView(
+                medicines: TodayPlan.demo.medicines,
+                reminderStatus: CapabilityCatalog.phase0.status(
+                    of: .medicationReminder
+                )
+            )
+        )
+        #expect(controller.view != nil)
+    }
+
+    // MARK: P2-2 `.notStarted` next-step copy
+
+    @Test func notStartedNextStepDoesNotReferenceStartCompanionButton() {
+        let nextStep = CompanionCopy.nextStep(for: .notStarted)
+        #expect(
+            nextStep.contains("开始陪伴") == false,
+            ".notStarted next-step copy must not reference removed button"
+        )
+    }
+
+    @Test func notStartedNextStepDescribesRealEntryPoints() {
+        let nextStep = CompanionCopy.nextStep(for: .notStarted)
+        #expect(
+            nextStep.contains("拍摄"),
+            "next-step copy must mention the camera entry point"
+        )
+        #expect(
+            nextStep.contains("相册"),
+            "next-step copy must mention the album entry point"
+        )
+    }
+}
+
 /// Test-target assembly for call sites that do not exercise result display.
 /// Production has no such overload: its initializer requires an explicitly
 /// composed `CareActionShownRecorder`.

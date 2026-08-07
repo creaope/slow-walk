@@ -195,9 +195,13 @@ struct CompanionView: View {
                 }
             }
 
-            Section("安全提醒") {
+            Section {
                 NotADiagnosisNotice()
                     .slowWalkReadableContent()
+            } header: {
+                Text("安全提醒")
+            } footer: {
+                DemoDataFooter()
             }
         }
         .listStyle(.insetGrouped)
@@ -320,9 +324,13 @@ struct CompanionView: View {
                 }
             }
 
-            Section("安全提醒") {
+            Section {
                 NotADiagnosisNotice()
                     .slowWalkReadableContent()
+            } header: {
+                Text("安全提醒")
+            } footer: {
+                DemoDataFooter()
             }
         }
         .listStyle(.insetGrouped)
