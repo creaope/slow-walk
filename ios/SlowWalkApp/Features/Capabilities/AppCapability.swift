@@ -66,6 +66,7 @@ enum CapabilityAvailability: Equatable, Hashable, CaseIterable {
 enum AppCapability: Equatable, Hashable, CaseIterable, Identifiable {
     case medicineRecognition
     case medicineRiskAssessment
+    case medicationReminder
     case visionOCR
     case coreLocation
     case arrivalReminder
@@ -80,6 +81,7 @@ enum AppCapability: Equatable, Hashable, CaseIterable, Identifiable {
         switch self {
         case .medicineRecognition: "药品识别"
         case .medicineRiskAssessment: "药品风险评估"
+        case .medicationReminder: "用药提醒通知"
         case .visionOCR: "照片文字识别（Vision）"
         case .coreLocation: "真实定位（CoreLocation）"
         case .arrivalReminder: "到站提醒"
@@ -183,6 +185,8 @@ extension CapabilityCatalog {
     ///   `MedicinePipeline` exists in `SlowWalkCore`, but no adapter in this
     ///   target calls it, so the app cannot assess anything today. It becomes
     ///   `.deviceLocal` when `LocalMedicineAssessmentRequester` lands.
+    /// - `medicationReminder` — the UI can display today's plan, but there is no
+    ///   medication schedule store or notification scheduler in this target.
     /// - `visionOCR` — no Vision adapter exists in this target.
     /// - `coreLocation` — no CoreLocation adapter exists in this target; the
     ///   travelling step is advanced by a button, not by movement.
@@ -202,6 +206,7 @@ extension CapabilityCatalog {
         availability: [
             .medicineRecognition: .simulated,
             .medicineRiskAssessment: .unavailable,
+            .medicationReminder: .unavailable,
             .visionOCR: .unavailable,
             .coreLocation: .unavailable,
             .arrivalReminder: .unavailable,
@@ -212,6 +217,7 @@ extension CapabilityCatalog {
         detail: [
             .medicineRecognition: "候选药名来自固定演示脚本，不读取相机图片。",
             .medicineRiskAssessment: "设备内评估将在下一阶段接入，本阶段不会给出风险等级。",
+            .medicationReminder: "当前只展示今日用药安排，不会发送系统通知。",
             .visionOCR: "尚未接入照片文字识别。",
             .coreLocation: "本阶段使用演示位置，出行步骤由手动操作推进。",
             .arrivalReminder: "本阶段不会自动提醒到站。",

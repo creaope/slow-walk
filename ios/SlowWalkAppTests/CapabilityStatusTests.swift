@@ -95,6 +95,7 @@ struct CapabilityStatusTests {
     @Test func unimplementedCapabilitiesAreReportedUnavailable() {
         let catalog = CapabilityCatalog.phase0
         let expectedUnavailable: [AppCapability] = [
+            .medicationReminder,
             .visionOCR,
             .coreLocation,
             .arrivalReminder,

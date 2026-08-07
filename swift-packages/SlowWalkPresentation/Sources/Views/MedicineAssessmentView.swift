@@ -12,6 +12,8 @@ public struct MedicineAssessmentView: View {
     private let state: MedicineDisplayState
     private let retryAction: (() -> Void)?
     private let confirmAction: (() -> Void)?
+    private let contextContent: AnyView
+    private let actionContent: AnyView
 
     public init(
         state: MedicineDisplayState,
@@ -21,13 +23,36 @@ public struct MedicineAssessmentView: View {
         self.state = state
         self.retryAction = retryAction
         self.confirmAction = confirmAction
+        contextContent = AnyView(EmptyView())
+        actionContent = AnyView(EmptyView())
+    }
+
+    /// Creates the canonical assessment inside a caller-owned workflow.
+    ///
+    /// These slots accept presentation-only context and controls. Recognition
+    /// evidence, risk semantics, and medical copy remain owned by `state` and
+    /// this package.
+    public init<ContextContent: View, ActionContent: View>(
+        state: MedicineDisplayState,
+        retryAction: (() -> Void)? = nil,
+        confirmAction: (() -> Void)? = nil,
+        @ViewBuilder contextContent: () -> ContextContent,
+        @ViewBuilder actionContent: () -> ActionContent
+    ) {
+        self.state = state
+        self.retryAction = retryAction
+        self.confirmAction = confirmAction
+        self.contextContent = AnyView(contextContent())
+        self.actionContent = AnyView(actionContent())
     }
 
     public var body: some View {
         Form {
             demoDisclaimerSection
+            contextContent
             content
             recognitionSection
+            actionContent
         }
     }
 
