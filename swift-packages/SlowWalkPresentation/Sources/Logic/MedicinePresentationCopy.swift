@@ -29,6 +29,14 @@ public enum MedicinePresentationCopy {
 
     // MARK: - Section headings
 
+    public static let recognitionHeading = "图片识别"
+    public static let resolvedMedicineLabel = "识别药品"
+    public static let pendingMedicineLabel = "候选药品（待确认）"
+    public static let recognizedTextLabel = "识别文字"
+    public static let localFallbackRecognitionNotice =
+        "在线识别暂不可用，已改用设备内识别。"
+    public static let onDeviceOnlyRecognitionNotice =
+        "本次仅在设备上识别。"
     public static let riskLevelHeading = "Risk level"
     public static let primaryInstructionHeading =
         "What to do next"
@@ -49,6 +57,33 @@ public enum MedicinePresentationCopy {
     /// absence is visible instead of silently rendering an empty section.
     public static let noSourceReferencesText =
         "No information source was recorded for this result."
+
+    /// Describes identity certainty without changing the canonical medicine.
+    public static func medicineNameLabel(
+        requiresMedicineConfirmation: Bool
+    ) -> String {
+        requiresMedicineConfirmation
+            ? pendingMedicineLabel
+            : resolvedMedicineLabel
+    }
+
+    /// A non-medical recognition provenance notice.
+    ///
+    /// All recoverable remote failure reasons intentionally collapse into one
+    /// user-facing sentence. Service brands, transport codes, and other
+    /// implementation details never cross the presentation boundary.
+    public static func recognitionNotice(
+        for context: MedicineRecognitionContext
+    ) -> String? {
+        switch context.source {
+        case .remote:
+            return nil
+        case .localFallback:
+            return context.fallbackReason == .onDeviceOnly
+                ? onDeviceOnlyRecognitionNotice
+                : localFallbackRecognitionNotice
+        }
+    }
 
     // MARK: - Progress and lifecycle
 

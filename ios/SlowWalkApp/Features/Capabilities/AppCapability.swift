@@ -16,6 +16,9 @@ enum CapabilityAvailability: Equatable, Hashable, CaseIterable {
     case simulated
     /// Runs on this device against real local code. No network involved.
     case deviceLocal
+    /// Prefers a real network service and remains usable through a real
+    /// on-device fallback.
+    case onlineWithLocalFallback
     /// Requires a network service to work at all.
     case online
     /// Not implemented yet. Nothing behind it.
@@ -23,7 +26,7 @@ enum CapabilityAvailability: Equatable, Hashable, CaseIterable {
 
     /// The short badge shown next to a capability's name.
     ///
-    /// These four strings are the only place the availability vocabulary is
+    /// These strings are the only place the availability vocabulary is
     /// written down, so two screens can never disagree about what "simulated"
     /// is called. They are deliberately distinct from one another: no two
     /// share a prefix, so "模拟" can never be read as "设备内".
@@ -31,6 +34,7 @@ enum CapabilityAvailability: Equatable, Hashable, CaseIterable {
         switch self {
         case .simulated: "模拟识别"
         case .deviceLocal: "设备内"
+        case .onlineWithLocalFallback: "可联网，可离线"
         case .online: "需要联网"
         case .unavailable: "尚未接入"
         }
@@ -52,7 +56,7 @@ enum CapabilityAvailability: Equatable, Hashable, CaseIterable {
     /// the world — "正在读取照片", "正在记录路线". `.simulated` answers `false`.
     var isRealImplementation: Bool {
         switch self {
-        case .deviceLocal, .online: true
+        case .deviceLocal, .onlineWithLocalFallback, .online: true
         case .simulated, .unavailable: false
         }
     }
@@ -66,6 +70,7 @@ enum CapabilityAvailability: Equatable, Hashable, CaseIterable {
 enum AppCapability: Equatable, Hashable, CaseIterable, Identifiable {
     case medicineRecognition
     case medicineRiskAssessment
+    case medicationReminder
     case visionOCR
     case coreLocation
     case arrivalReminder
@@ -80,6 +85,7 @@ enum AppCapability: Equatable, Hashable, CaseIterable, Identifiable {
         switch self {
         case .medicineRecognition: "药品识别"
         case .medicineRiskAssessment: "药品风险评估"
+        case .medicationReminder: "用药提醒通知"
         case .visionOCR: "照片文字识别（Vision）"
         case .coreLocation: "真实定位（CoreLocation）"
         case .arrivalReminder: "到站提醒"
@@ -173,6 +179,51 @@ struct CapabilityStatus: Equatable, Hashable, Identifiable {
 }
 
 extension CapabilityCatalog {
+    /// Current medicine-recognition composition.
+    ///
+    /// Online recognition is optional: when configured it is preferred, while
+    /// Vision OCR and the canonical assessment pipeline remain available on
+    /// device. The catalog describes that runtime composition without turning
+    /// availability into a medical or risk judgment.
+    static func medicineRecognitionMainline(
+        onlineRecognitionConfigured: Bool
+    ) -> CapabilityCatalog {
+        CapabilityCatalog(
+            availability: [
+                .medicineRecognition: onlineRecognitionConfigured
+                    ? .onlineWithLocalFallback
+                    : .deviceLocal,
+                .medicineRiskAssessment: .deviceLocal,
+                .visionOCR: .deviceLocal,
+                .coreLocation: .unavailable,
+                .arrivalReminder: .unavailable,
+                .careRecordPersistence: .unavailable,
+                .trustedContacts: .unavailable,
+                .serverDependency: onlineRecognitionConfigured
+                    ? .onlineWithLocalFallback
+                    : .unavailable,
+            ],
+            detail: [
+                .medicineRecognition: onlineRecognitionConfigured
+                    ? "可使用在线包装识别，也可在设置中选择仅在设备上识别。"
+                    : "未配置在线识别服务，药盒照片仅在设备上识别。",
+                .medicineRiskAssessment:
+                    "药品身份确认后，风险评估在设备内完成。",
+                .visionOCR:
+                    "设备内文字识别用于隐私模式和在线不可用时的兜底。",
+                .coreLocation:
+                    "本阶段使用演示位置，出行步骤由手动操作推进。",
+                .arrivalReminder: "本阶段不会自动提醒到站。",
+                .careRecordPersistence:
+                    "记录只保存在内存中，重新启动后会清空。",
+                .trustedContacts: "本阶段尚未接入联系功能。",
+                .serverDependency: onlineRecognitionConfigured
+                    ? "在线识别服务已配置但不是必需；设备内识别不依赖服务端。"
+                    : "未配置在线识别服务，当前不连接服务端。",
+            ]
+        )
+    }
+
     /// What this build can really do, as of Phase 0.
     ///
     /// Every value here is checked against the source that implements it:
@@ -183,6 +234,8 @@ extension CapabilityCatalog {
     ///   `MedicinePipeline` exists in `SlowWalkCore`, but no adapter in this
     ///   target calls it, so the app cannot assess anything today. It becomes
     ///   `.deviceLocal` when `LocalMedicineAssessmentRequester` lands.
+    /// - `medicationReminder` — the UI can display today's plan, but there is no
+    ///   medication schedule store or notification scheduler in this target.
     /// - `visionOCR` — no Vision adapter exists in this target.
     /// - `coreLocation` — no CoreLocation adapter exists in this target; the
     ///   travelling step is advanced by a button, not by movement.
@@ -202,6 +255,7 @@ extension CapabilityCatalog {
         availability: [
             .medicineRecognition: .simulated,
             .medicineRiskAssessment: .unavailable,
+            .medicationReminder: .unavailable,
             .visionOCR: .unavailable,
             .coreLocation: .unavailable,
             .arrivalReminder: .unavailable,
@@ -212,6 +266,7 @@ extension CapabilityCatalog {
         detail: [
             .medicineRecognition: "候选药名来自固定演示脚本，不读取相机图片。",
             .medicineRiskAssessment: "设备内评估将在下一阶段接入，本阶段不会给出风险等级。",
+            .medicationReminder: "当前只展示今日用药安排，不会发送系统通知。",
             .visionOCR: "尚未接入照片文字识别。",
             .coreLocation: "本阶段使用演示位置，出行步骤由手动操作推进。",
             .arrivalReminder: "本阶段不会自动提醒到站。",

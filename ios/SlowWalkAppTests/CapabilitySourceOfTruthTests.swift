@@ -124,17 +124,33 @@ struct CapabilitySourceOfTruthTests {
         #expect(environment.companion.capabilities == environment.capabilities)
     }
 
-    /// The shipping app is assembled from `.phase0`.
-    ///
-    /// The counterpart to the test above: removing the second source must not
-    /// have changed what the real app describes.
-    @Test func defaultEnvironmentUsesPhase0() {
+    /// Without an online endpoint, the shipping app reports the local mainline.
+    @Test func defaultEnvironmentUsesLocalMedicineMainline() {
+        let expected = CapabilityCatalog.medicineRecognitionMainline(
+            onlineRecognitionConfigured: false
+        )
         let environment = AppEnvironment(
-            clock: AppFixedClock(fixedDate: Date(timeIntervalSince1970: 1_753_000_000))
+            clock: AppFixedClock(
+                fixedDate: Date(timeIntervalSince1970: 1_753_000_000)
+            ),
+            medicineRecognitionServerConfiguration: .unavailable
         )
 
-        #expect(environment.capabilities == .phase0)
-        #expect(environment.companion.capabilities == .phase0)
+        #expect(environment.capabilities == expected)
+        #expect(environment.companion.capabilities == expected)
+        #expect(
+            expected.availability(of: .medicineRecognition)
+                == .deviceLocal
+        )
+        #expect(
+            expected.availability(of: .medicineRiskAssessment)
+                == .deviceLocal
+        )
+        #expect(expected.availability(of: .visionOCR) == .deviceLocal)
+        #expect(
+            expected.availability(of: .serverDependency)
+                == .unavailable
+        )
     }
 
     // MARK: - A capability becoming available changes the wording

@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "assetSet": "slowwalk-a5-medicine-v1",
+  "disclaimer": "DEMO DATA — NOT FOR CLINICAL USE",
+  "assets": [
+    {
+      "id": "acetaminophen-angle-v1",
+      "file": "images/acetaminophen-angle-v1.png",
+      "sha256": "29caa57f814df97d076d00bde872f2b65f9195000ccea179407ed4d2571be95c",
+      "synthetic": true,
+      "approvedForRecording": false,
+      "expectedVisibleTexts": [
+        "SLOWWALK DEMO MEDICINE",
+        "ACETAMINOPHEN",
+        "500 mg",
+        "DEMO DATA — NOT FOR CLINICAL USE",
+        "演示数据，不用于临床用途"
+      ],
+      "expectedCanonicalMedicineID": "demo-acetaminophen",
+      "purpose": "Deterministic rotated capture test",
+      "expectedReadable": true,
+      "expectedAmbiguous": false,
+      "generatedBy": "scripts/demo-assets/generate_medicine_demo_assets.py",
+      "generatorVersion": "1.0.0",
+      "width": 640,
+      "height": 480,
+      "mimeType": "image/png"
+    },
+    {
+      "id": "acetaminophen-clean-v1",
+      "file": "images/acetaminophen-clean-v1.png",
+      "sha256": "ca50f3f9e570df70b6ac7109076f2075e141279025349a39bdd233858a47164f",
+      "synthetic": true,
+      "approvedForRecording": true,
+      "expectedVisibleTexts": [
+        "SLOWWALK DEMO MEDICINE",
+        "ACETAMINOPHEN",
+        "500 mg",
+        "DEMO DATA — NOT FOR CLINICAL USE",
+        "演示数据，不用于临床用途"
+      ],
+      "expectedCanonicalMedicineID": "demo-acetaminophen",
+      "purpose": "Approved A5 recording image",
+      "expectedReadable": true,
+      "expectedAmbiguous": false,
+      "generatedBy": "scripts/demo-assets/generate_medicine_demo_assets.py",
+      "generatorVersion": "1.0.0",
+      "width": 640,
+      "height": 480,
+      "mimeType": "image/png"
+    },
+    {
+      "id": "acetaminophen-lowlight-v1",
+      "file": "images/acetaminophen-lowlight-v1.png",
+      "sha256": "ff4f0c94256285dc1979ff1b3335732e5032638895c6929a285dd73e4324253c",
+      "synthetic": true,
+      "approvedForRecording": false,
+      "expectedVisibleTexts": [
+        "SLOWWALK DEMO MEDICINE",
+        "ACETAMINOPHEN",
+        "500 mg",
+        "DEMO DATA — NOT FOR CLINICAL USE",
+        "演示数据，不用于临床用途"
+      ],
+      "expectedCanonicalMedicineID": "demo-acetaminophen",
+      "purpose": "Deterministic low-light capture test",
+      "expectedReadable": true,
+      "expectedAmbiguous": false,
+      "generatedBy": "scripts/demo-assets/generate_medicine_demo_assets.py",
+      "generatorVersion": "1.0.0",
+      "width": 640,
+      "height": 480,
+      "mimeType": "image/png"
+    },
+    {
+      "id": "cold-relief-ambiguous-v1",
+      "file": "images/cold-relief-ambiguous-v1.png",
+      "sha256": "f593afe8b4a17a0f2f6d8e0f16ea1bbbad74d671f8ac240ad7d3b084f4a34d99",
+      "synthetic": true,
+      "approvedForRecording": false,
+      "expectedVisibleTexts": [
+        "SLOWWALK SYNTHETIC LABEL",
+        "COLD RELIEF STUDY",
+        "MULTI-INGREDIENT",
+        "ACETAMINOPHEN",
+        "DEXTROMETHORPHAN",
+        "DEMO DATA — NOT FOR CLINICAL USE"
+      ],
+      "expectedCanonicalMedicineID": null,
+      "purpose": "Multi-ingredient and partially obscured ambiguity test",
+      "expectedReadable": true,
+      "expectedAmbiguous": true,
+      "generatedBy": "scripts/demo-assets/generate_medicine_demo_assets.py",
+      "generatorVersion": "1.0.0",
+      "width": 640,
+      "height": 480,
+      "mimeType": "image/png"
+    }
+  ]
+}

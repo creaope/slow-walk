@@ -344,7 +344,7 @@ struct MedicineAssessmentGateTests {
         }
     }
 
-    @Test func staleCaptureAcceptedCallbackCannotCloseReopenedCapture()
+    @Test func staleCaptureInputCannotRevealReopenedAssessmentSurface()
         throws
     {
         let (session, _) = Self.captureFirstSessionAndStore()
@@ -357,30 +357,44 @@ struct MedicineAssessmentGateTests {
         lifecycle.requestCurrentDismissal()
         lifecycle.present(current)
 
-        let staleAccepted = lifecycle.assessmentSubmissionAccepted(
-            for: old,
-            currentGateLease: lease,
-            currentViewModelToken: old.viewModelToken
-        )
-        #expect(staleAccepted == false)
         let oldDismissal = lifecycle.completeNextDismissal()
         #expect(oldDismissal == old)
         #expect(lifecycle.current == current)
         #expect(lifecycle.isPresented)
 
-        let wrongViewModelAccepted = lifecycle.assessmentSubmissionAccepted(
+        let staleInput = lifecycle.inputSubmissionStarted(
+            for: old,
+            currentGateLease: lease,
+            currentViewModelToken: old.viewModelToken
+        )
+        #expect(staleInput == false)
+
+        let wrongViewModelInput = lifecycle.inputSubmissionStarted(
             for: current,
             currentGateLease: lease,
             currentViewModelToken: old.viewModelToken
         )
-        #expect(wrongViewModelAccepted == false)
-        let currentAccepted = lifecycle.assessmentSubmissionAccepted(
+        #expect(wrongViewModelInput == false)
+
+        let inputStarted = lifecycle.inputSubmissionStarted(
             for: current,
             currentGateLease: lease,
             currentViewModelToken: current.viewModelToken
         )
-        #expect(currentAccepted)
-        #expect(lifecycle.isPresented == false)
+        #expect(inputStarted)
+        #expect(lifecycle.isPresented)
+        #expect(lifecycle.isAssessmentPresented)
+        let prematureDismissal = lifecycle.completeNextDismissal()
+        #expect(prematureDismissal == nil)
+
+        let staleReturn = lifecycle.returnToCapture(for: old)
+        #expect(staleReturn == false)
+        let currentReturn = lifecycle.returnToCapture(for: current)
+        #expect(currentReturn)
+        #expect(lifecycle.isPresented)
+        #expect(lifecycle.isAssessmentPresented == false)
+
+        lifecycle.requestCurrentDismissal()
         let currentDismissal = lifecycle.completeNextDismissal()
         #expect(currentDismissal == current)
         #expect(lifecycle.current == nil)
@@ -402,12 +416,12 @@ struct MedicineAssessmentGateTests {
         let current = Self.captureIdentity(lease: newLease)
         lifecycle.present(current)
 
-        let staleAccepted = lifecycle.assessmentSubmissionAccepted(
+        let staleInput = lifecycle.inputSubmissionStarted(
             for: old,
             currentGateLease: newLease,
             currentViewModelToken: old.viewModelToken
         )
-        #expect(staleAccepted == false)
+        #expect(staleInput == false)
         let oldDismissal = lifecycle.completeNextDismissal()
         #expect(oldDismissal == old)
         #expect(lifecycle.current == current)
@@ -415,7 +429,41 @@ struct MedicineAssessmentGateTests {
     }
 
     @Test func medicineCaptureCopyContainsNoASCIIEnglishText() {
-        #expect(MedicineCaptureCopy.allUserVisibleText.count == 22)
+        let expected = [
+            MedicineCaptureCopy.assessmentStartFailed,
+            MedicineCaptureCopy.medicineCompanionTitle,
+            MedicineCaptureCopy.capturePrompt,
+            MedicineCaptureCopy.requestingCameraPermission,
+            MedicineCaptureCopy.startingCamera,
+            MedicineCaptureCopy.cameraPermissionDenied,
+            MedicineCaptureCopy.cameraRestricted,
+            MedicineCaptureCopy.capturing,
+            MedicineCaptureCopy.loadingPhoto,
+            MedicineCaptureCopy.processingImage,
+            MedicineCaptureCopy.noTextFound,
+            MedicineCaptureCopy.recognitionFailed,
+            MedicineCaptureCopy.cancelled,
+            MedicineCaptureCopy.cameraUnavailable,
+            MedicineCaptureCopy.useCamera,
+            MedicineCaptureCopy.choosePhoto,
+            MedicineCaptureCopy.openSettings,
+            MedicineCaptureCopy.retry,
+            MedicineCaptureCopy.cancel,
+            MedicineCaptureCopy.retake,
+            MedicineCaptureCopy.close,
+            MedicineCaptureCopy.recognizedText,
+            MedicineCaptureCopy.photoLoadFailed,
+            MedicineCaptureCopy.scannerFailed,
+            MedicineCaptureCopy.scannerReturnedNoPage,
+            MedicineCaptureCopy.singlePageRequired,
+            MedicineCaptureCopy.imageEncodingFailed,
+            MedicineCaptureCopy.captureInstructions,
+            MedicineCaptureCopy.cameraAccessibilityHint,
+            MedicineCaptureCopy.photoAccessibilityHint,
+        ]
+
+        #expect(MedicineCaptureCopy.allUserVisibleText == expected)
+        #expect(Set(expected).count == expected.count)
         #expect(
             MedicineCaptureCopy.allUserVisibleText.allSatisfy { text in
                 text.unicodeScalars.allSatisfy { scalar in
@@ -1318,20 +1366,100 @@ struct MedicineAssessmentGateTests {
         )
     }
 
-    /// Hosting the real Companion assessment branch exercises SwiftUI's
-    /// result-only `onAppear`, including same-ID idempotency and replacement.
+    /// The App passes one disclaimer into Presentation and never owns a second
+    /// assessment banner, regardless of whether an ActionCard exists.
+    @Test func assessmentPageUsesOnePresentationOwnedDemoDisclaimer() {
+        let timeout = ClientFailure(
+            kind: .timeout,
+            apiErrorCode: nil,
+            requestID: nil,
+            endpoint: nil,
+            isRecoverable: true
+        )
+        let confirmationWithoutCard = MedicineConfirmationRequirement(
+            reason: .noRecognizedText,
+            recognitionInput: MedicineRecognitionInput(
+                recognizedTexts: [],
+                capturedAt: Date(timeIntervalSince1970: 0),
+                languageCode: nil,
+                rawConfidence: nil
+            ),
+            response: nil
+        )
+        let states: [MedicineAssessmentViewState] = [
+            .idle,
+            .result(Self.presentation),
+            .recognizing(startedAt: Date(timeIntervalSince1970: 0)),
+            .assessing(startedAt: Date(timeIntervalSince1970: 0)),
+            .failed(Self.clientFailure),
+            .failed(timeout),
+            .requiresMedicineConfirmation(confirmationWithoutCard),
+            .cancelled,
+        ]
+
+        for state in states {
+            let page = CompanionView.AssessmentPagePresentation(state)
+            #expect(
+                page.displayState.demoDisclaimer
+                    == CompanionCopy.demoDataNotice
+            )
+        }
+    }
+
+    @Test func assessmentPageDoesNotRenderAnAppLevelDemoBanner() throws {
+        let source = try Self.companionViewSource()
+        let pageStart = try #require(
+            source.range(of: "private func assessmentPage(")
+        )
+        let pageEnd = try #require(
+            source.range(of: "private func assessmentPresentation(")
+        )
+        let pageSource = source[
+            pageStart.lowerBound ..< pageEnd.lowerBound
+        ]
+
+        #expect(pageSource.contains("DemoDataBanner") == false)
+    }
+
+    @Test func assessmentPageDoesNotInventProductionDisclaimer() {
+        let page = CompanionView.AssessmentPagePresentation(
+            .result(Self.presentation),
+            demoDisclaimer: nil
+        )
+
+        #expect(page.displayState.demoDisclaimer == nil)
+    }
+
+    /// The hub must not acknowledge a result that is held behind the medicine
+    /// route. Hosting the real assessment page then exercises its result-only
+    /// `onAppear`, including same-ID idempotency and replacement.
     @Test func hostedResultPageAcknowledgesEachCanonicalRequestOnce() async {
         let (session, store) = await Self.sessionAndStoreAtGate(
             latestUpdate: Self.makeResultUpdate(sequenceNumber: 1)
         )
-        let initialHost = Self.host(CompanionView(session: session))
+        let hubHost = Self.host(CompanionView(session: session))
+
+        #expect(session.assessmentGate?.hasDisplayedCurrentResult == false)
+        #expect(Self.careActionShownCount(in: store) == 0)
+
+        let initialHost = Self.host(
+            HostedMedicineAssessmentPage(session: session)
+        )
+        await Self.waitForUI {
+            session.assessmentGate?.hasDisplayedCurrentResult == true
+        }
 
         #expect(session.assessmentGate?.hasDisplayedCurrentResult == true)
         #expect(Self.careActionShownCount(in: store) == 1)
 
         // A separate hierarchy produces another `onAppear` for the same
         // request, while A2a remains the final idempotency boundary.
-        let repeatedHost = Self.host(CompanionView(session: session))
+        let repeatedHost = Self.host(
+            HostedMedicineAssessmentPage(session: session)
+        )
+        await Self.waitForUI {
+            Self.careActionShownCount(in: store) == 1
+        }
         #expect(Self.careActionShownCount(in: store) == 1)
         repeatedHost.window.isHidden = true
 
@@ -1346,7 +1474,13 @@ struct MedicineAssessmentGateTests {
                 state: .result(replacement)
             )
         )
-        let replacementHost = Self.host(CompanionView(session: session))
+        let replacementHost = Self.host(
+            HostedMedicineAssessmentPage(session: session)
+        )
+        await Self.waitForUI {
+            session.assessmentGate?.displayedResultRequestID
+                == replacement.response.requestID
+        }
 
         #expect(
             session.assessmentGate?.displayedResultRequestID
@@ -1355,6 +1489,7 @@ struct MedicineAssessmentGateTests {
         #expect(Self.careActionShownCount(in: store) == 2)
         replacementHost.window.isHidden = true
         initialHost.window.isHidden = true
+        hubHost.window.isHidden = true
     }
 
     /// A hosted non-result page never enters the result-only acknowledgement
@@ -1728,15 +1863,20 @@ struct MedicineAssessmentGateTests {
         )
     }
 
-    static func host(
-        _ view: CompanionView
+    static func host<Content: View>(
+        _ view: Content
     ) -> (
         window: UIWindow,
         controller: UIHostingController<AnyView>
     ) {
         let environment = AppEnvironment.preview()
         let controller = UIHostingController(
-            rootView: AnyView(view.environment(environment))
+            rootView: AnyView(
+                NavigationStack {
+                    view
+                }
+                .environment(environment)
+            )
         )
         let window = UIWindow(
             frame: CGRect(x: 0, y: 0, width: 390, height: 844)
@@ -1745,6 +1885,35 @@ struct MedicineAssessmentGateTests {
         window.makeKeyAndVisible()
         controller.view.layoutIfNeeded()
         return (window, controller)
+    }
+
+    static func waitForUI(
+        _ condition: @escaping @MainActor () -> Bool
+    ) async {
+        for _ in 0..<100 {
+            if condition() { return }
+            await Task.yield()
+        }
+    }
+
+    private struct HostedMedicineAssessmentPage: View {
+        let session: CompanionSessionModel
+
+        var body: some View {
+            CompanionView(session: session).activeMedicineAssessmentPage
+        }
+    }
+
+    static func companionViewSource() throws -> String {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("SlowWalkApp")
+            .appendingPathComponent("Features")
+            .appendingPathComponent("Companion")
+            .appendingPathComponent("CompanionView.swift")
+
+        return try String(contentsOf: url, encoding: .utf8)
     }
 
     static func careActionShownCount(
@@ -1872,6 +2041,179 @@ struct MedicineAssessmentGateTests {
         latestUpdate: MedicineAssessmentStateUpdate? = nil
     ) async -> CompanionSessionModel {
         await sessionAndStoreAtGate(latestUpdate: latestUpdate).0
+    }
+}
+
+// MARK: - P2 minimal fix tests
+
+/// Verification for the two P2 fixes:
+/// 1. DemoDataFooter is present on companion hub, flow, and medication reminder pages.
+/// 2. `.notStarted` next-step copy no longer references a removed button.
+///
+/// Demo-annotation tests use the same source-verification pattern as the
+/// existing `assessmentPageDoesNotRenderAnAppLevelDemoBanner`: they read the
+/// production source and assert structural presence. SwiftUI `List` section
+/// footers are lazily rendered inside `UICollectionView` and are not reliably
+/// reachable through UIKit view-hierarchy traversal, so a smoke-host step
+/// confirms the hosting path does not crash, and source checks confirm the
+/// annotation is wired in at the right call sites.
+@MainActor
+struct CompanionP2FixTests {
+
+    // MARK: Source helpers
+
+    private static func companionViewSource() throws -> String {
+        try MedicineAssessmentGateTests.companionViewSource()
+    }
+
+    private static func medicationReminderViewSource() throws -> String {
+        let url = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .appendingPathComponent("SlowWalkApp")
+            .appendingPathComponent("Features")
+            .appendingPathComponent("Companion")
+            .appendingPathComponent("MedicationReminderView.swift")
+        return try String(contentsOf: url, encoding: .utf8)
+    }
+
+    /// Returns the source range for the given computed property or function
+    /// body. Best-effort: looks for `var <name>` or `func <name>` followed
+    /// by the next declaration marker at the same indentation level.
+    private static func bodySource(
+        _ source: String,
+        for declaratorPattern: String
+    ) -> String {
+        guard let start = source.range(of: declaratorPattern) else {
+            return ""
+        }
+        let tail = source[start.upperBound...]
+        var accumulated = ""
+        for line in tail.split(separator: "\n", omittingEmptySubsequences: false) {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            if accumulated.count > 4,
+               trimmed.hasPrefix("private "),
+               line.first?.isWhitespace == true,
+               line.prefix(5).allSatisfy({ $0 == " " }) {
+                break
+            }
+            if accumulated.count > 4,
+               line.first?.isWhitespace == true,
+               line.prefix(5).allSatisfy({ $0 == " " }),
+               (trimmed.hasPrefix("var ") || trimmed.hasPrefix("func ")
+                || trimmed.hasPrefix("case ") || trimmed.hasPrefix("@")
+                || trimmed.hasPrefix("// MARK:")) {
+                break
+            }
+            accumulated += String(line) + "\n"
+        }
+        return accumulated
+    }
+
+    // MARK: P2-1 Demo annotations — source verification
+
+    @Test func companionHubContainsDemoDataFooter() throws {
+        let source = try Self.companionViewSource()
+        let hubBody = Self.bodySource(
+            source,
+            for: "private var companionHubPage: some View {"
+        )
+        #expect(
+            hubBody.contains("DemoDataFooter()"),
+            "companion hub page must reference DemoDataFooter"
+        )
+    }
+
+    @Test func companionFlowPageContainsDemoDataFooter() throws {
+        let source = try Self.companionViewSource()
+        let flowBody = Self.bodySource(
+            source,
+            for: "private var companionFlowPage: some View {"
+        )
+        #expect(
+            flowBody.contains("DemoDataFooter()"),
+            "companion flow page must reference DemoDataFooter"
+        )
+    }
+
+    @Test func medicationReminderViewContainsDemoDataFooter() throws {
+        let source = try Self.medicationReminderViewSource()
+        #expect(
+            source.contains("DemoDataFooter()"),
+            "MedicationReminderView must reference DemoDataFooter"
+        )
+    }
+
+    @Test func companionAssessmentPageDoesNotAddDuplicateDemoBanner() throws {
+        let source = try Self.companionViewSource()
+        let assessmentBody = Self.bodySource(
+            source,
+            for: "private func assessmentPresentation("
+        )
+        #expect(
+            assessmentBody.contains("DemoDataFooter()") == false,
+            "assessment page must not duplicate the canonical demo disclaimer"
+        )
+    }
+
+    @Test func companionViewHasExactlyTwoDemoDataFooterReferences() throws {
+        let source = try Self.companionViewSource()
+        var count = 0
+        var search = source.startIndex
+        let needle = "DemoDataFooter()"
+        while let range = source[search...].range(of: needle) {
+            count += 1
+            search = range.upperBound
+        }
+        #expect(count == 2, "companion view must have exactly 2 DemoDataFooter references, found \(count)")
+    }
+
+    // MARK: P2-1 Demo annotations — smoke host
+
+    @Test func companionHubHostsWithoutCrash() {
+        let session = CompanionSessionModel(
+            records: RecordingCareRecordStore(),
+            plan: .demo,
+            capabilities: .phase0
+        )
+        let (_, controller) = MedicineAssessmentGateTests.host(
+            CompanionView(session: session)
+        )
+        #expect(controller.view != nil)
+    }
+
+    @Test func medicationReminderViewHostsWithoutCrash() {
+        let (_, controller) = MedicineAssessmentGateTests.host(
+            MedicationReminderView(
+                medicines: TodayPlan.demo.medicines,
+                reminderStatus: CapabilityCatalog.phase0.status(
+                    of: .medicationReminder
+                )
+            )
+        )
+        #expect(controller.view != nil)
+    }
+
+    // MARK: P2-2 `.notStarted` next-step copy
+
+    @Test func notStartedNextStepDoesNotReferenceStartCompanionButton() {
+        let nextStep = CompanionCopy.nextStep(for: .notStarted)
+        #expect(
+            nextStep.contains("开始陪伴") == false,
+            ".notStarted next-step copy must not reference removed button"
+        )
+    }
+
+    @Test func notStartedNextStepDescribesRealEntryPoints() {
+        let nextStep = CompanionCopy.nextStep(for: .notStarted)
+        #expect(
+            nextStep.contains("拍摄"),
+            "next-step copy must mention the camera entry point"
+        )
+        #expect(
+            nextStep.contains("相册"),
+            "next-step copy must mention the album entry point"
+        )
     }
 }
 

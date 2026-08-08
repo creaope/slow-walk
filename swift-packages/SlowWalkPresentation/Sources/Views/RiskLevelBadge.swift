@@ -20,43 +20,35 @@ public struct RiskLevelBadge: View {
     }
 
     public var body: some View {
-        HStack(spacing: 6) {
+        Label {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(
+                    """
+                    \(MedicinePresentationCopy.shapeToken(
+                        presentation.level
+                    )) \(MedicinePresentationCopy.levelName(
+                        presentation.level
+                    ))
+                    """
+                )
+                .font(.headline)
+
+                Text(
+                    MedicinePresentationCopy.attentionName(
+                        presentation.attention
+                    )
+                )
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+            }
+        } icon: {
             Image(
                 systemName: MedicinePresentationCopy
                     .symbolName(presentation.level)
             )
-            .imageScale(.medium)
-
-            Text(
-                MedicinePresentationCopy.shapeToken(
-                    presentation.level
-                )
-            )
-
-            Text(
-                MedicinePresentationCopy.levelName(
-                    presentation.level
-                )
-            )
-            .fontWeight(.semibold)
-
-            Text(
-                MedicinePresentationCopy.attentionName(
-                    presentation.attention
-                )
-            )
-        }
-        .font(.subheadline)
-        .foregroundStyle(foregroundStyle)
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .overlay {
-            // A visible border keeps the badge readable when the fill color
-            // is not perceived.
-            Capsule().strokeBorder(
-                foregroundStyle,
-                lineWidth: borderWidth
-            )
+            .imageScale(.large)
+            .foregroundStyle(foregroundStyle)
+            .accessibilityHidden(true)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(
@@ -77,11 +69,5 @@ public struct RiskLevelBadge: View {
         case .red:
             return .red
         }
-    }
-
-    /// A thicker border for levels that require attention gives a further
-    /// non-color cue.
-    private var borderWidth: CGFloat {
-        presentation.requiresImmediateAttention ? 2 : 1
     }
 }

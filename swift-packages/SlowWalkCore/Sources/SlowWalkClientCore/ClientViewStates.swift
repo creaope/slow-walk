@@ -52,11 +52,14 @@ public struct MedicineAssessmentPresentation:
     public let response:
         MedicineAssessmentResponseDTO
     public let risk: RiskPresentation
+    public let recognitionContext: MedicineRecognitionContext
 
     public init(
-        response: MedicineAssessmentResponseDTO
+        response: MedicineAssessmentResponseDTO,
+        recognitionContext: MedicineRecognitionContext = .onDeviceOnly
     ) {
         self.response = response
+        self.recognitionContext = recognitionContext
         risk = RiskPresentation(
             level: response.actionCard.riskLevel
         )
@@ -87,17 +90,20 @@ public struct MedicineConfirmationRequirement:
         MedicineRecognitionInput
     public let response:
         MedicineAssessmentResponseDTO?
+    public let recognitionContext: MedicineRecognitionContext
 
     public init(
         reason: MedicineConfirmationReason,
         recognitionInput:
             MedicineRecognitionInput,
         response:
-            MedicineAssessmentResponseDTO?
+            MedicineAssessmentResponseDTO?,
+        recognitionContext: MedicineRecognitionContext = .onDeviceOnly
     ) {
         self.reason = reason
         self.recognitionInput = recognitionInput
         self.response = response
+        self.recognitionContext = recognitionContext
     }
 }
 

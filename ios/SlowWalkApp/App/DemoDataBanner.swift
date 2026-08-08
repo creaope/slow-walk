@@ -27,6 +27,20 @@ struct DemoDataBanner: View {
     }
 }
 
+/// A low-emphasis marker for demo-driven screens where a full banner would
+/// compete with the page's primary content.
+struct DemoDataFooter: View {
+    var body: some View {
+        Text("\(CompanionCopy.demoDataNotice) · 演示数据，不用于临床用途")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .accessibilityLabel(
+                "\(CompanionCopy.demoDataNotice)。演示数据，不用于临床用途。"
+            )
+    }
+}
+
 /// The app's standing reminder that SlowWalk gives reminders, not diagnoses.
 struct NotADiagnosisNotice: View {
     var body: some View {

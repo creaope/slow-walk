@@ -33,6 +33,86 @@ final class CanonicalContentTests: XCTestCase {
         )
     }
 
+    func test_resultRecognitionEvidence_isPreserved() async throws {
+        let payload = try PresentationFixtureLoader.load(
+            "medicine-normal.json"
+        )
+        let viewState = try await CoordinatorHarness.viewState(
+            for: payload
+        )
+        let display = MedicineStateMapper.map(viewState)
+
+        XCTAssertEqual(
+            display.recognition?.recognizedTexts,
+            payload.response.resolution.evidence.recognizedTexts
+        )
+        XCTAssertEqual(
+            display.recognition?.resolvedMedicineName,
+            payload.response.resolution.selectedMedicine?.canonicalName
+        )
+        XCTAssertFalse(display.requiresMedicineConfirmation)
+        XCTAssertEqual(
+            MedicinePresentationCopy.medicineNameLabel(
+                requiresMedicineConfirmation:
+                    display.requiresMedicineConfirmation
+            ),
+            MedicinePresentationCopy.resolvedMedicineLabel
+        )
+    }
+
+    func test_serverConfirmationUsesPendingLabelWithoutChangingMedicineName()
+        async throws
+    {
+        let payload = try PresentationFixtureLoader.load(
+            "medicine-source-warning.json"
+        )
+        let viewState = try await CoordinatorHarness.viewState(
+            for: payload
+        )
+        guard case let .requiresMedicineConfirmation(requirement) = viewState
+        else {
+            return XCTFail("Expected server confirmation state")
+        }
+        XCTAssertEqual(requirement.reason, .serverRequiresConfirmation)
+
+        let selectedName = try XCTUnwrap(
+            requirement.response?.resolution.selectedMedicine?.canonicalName
+        )
+        let display = MedicineStateMapper.map(viewState)
+
+        XCTAssertTrue(display.requiresMedicineConfirmation)
+        XCTAssertEqual(
+            display.recognition?.resolvedMedicineName,
+            selectedName
+        )
+        XCTAssertEqual(
+            MedicinePresentationCopy.medicineNameLabel(
+                requiresMedicineConfirmation:
+                    display.requiresMedicineConfirmation
+            ),
+            MedicinePresentationCopy.pendingMedicineLabel
+        )
+    }
+
+    func test_ambiguousRecognitionEvidence_isPreservedWithoutInventingMedicine()
+        async throws
+    {
+        let payload = try PresentationFixtureLoader.load(
+            "medicine-ambiguous.json"
+        )
+        let viewState = try await CoordinatorHarness.viewState(
+            for: payload
+        )
+        let display = MedicineStateMapper.map(viewState)
+
+        XCTAssertEqual(
+            display.recognition?.recognizedTexts,
+            payload.request.input.recognizedTexts
+        )
+        XCTAssertNil(payload.response.resolution.selectedMedicine)
+        XCTAssertNil(display.recognition?.resolvedMedicineName)
+    }
+
     // MARK: - Test 18: primaryInstruction 完整传递
 
     func test_actionCardPrimaryInstruction_isPreserved() async throws {
