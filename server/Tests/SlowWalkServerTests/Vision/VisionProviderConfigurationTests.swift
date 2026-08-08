@@ -35,15 +35,16 @@ final class VisionProviderConfigurationTests:
         )
     }
 
-    func testDefaultsAllowAtMostTwoRetries() throws {
+    func testDefaultsAllowAtMostOneRetry() throws {
         let configuration = try VisionProviderConfiguration(
             providerIdentifier: "example",
             baseURL: validBaseURL,
             model: "vision-model"
         )
 
-        // One initial attempt plus at most two retries.
-        XCTAssertEqual(configuration.maxAttempts, 3)
+        // One initial attempt plus at most one retry.
+        XCTAssertEqual(configuration.requestTimeout, 45)
+        XCTAssertEqual(configuration.maxAttempts, 2)
         XCTAssertEqual(
             VisionProviderConfiguration
                 .maximumSupportedAttempts,

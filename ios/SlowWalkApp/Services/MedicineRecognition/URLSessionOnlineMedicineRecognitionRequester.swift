@@ -26,7 +26,7 @@ nonisolated final class URLSessionOnlineMedicineRecognitionRequester:
     OnlineMedicineRecognitionRequesting,
     @unchecked Sendable
 {
-    static let requestTimeout: TimeInterval = 40
+    static let requestTimeout: TimeInterval = 100
     static let maximumResponseBytes = 1 * 1_024 * 1_024
     static let maximumUploadBytes = 4 * 1_024 * 1_024
 
