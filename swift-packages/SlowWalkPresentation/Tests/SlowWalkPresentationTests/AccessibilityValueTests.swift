@@ -282,7 +282,7 @@ final class AccessibilityValueTests: XCTestCase {
             .doNotTakeUntilMedicineConfirmed
         )
         XCTAssertTrue(
-            doNotTake.lowercased().contains("do not take"),
+            doNotTake.contains("请勿服用"),
             """
             doNotTakeUntilMedicineConfirmed renders as "\(doNotTake)", \
             which drops the canonical restriction.
@@ -295,6 +295,49 @@ final class AccessibilityValueTests: XCTestCase {
     func test_demoDisclaimer_isNonEmpty() {
         XCTAssertFalse(
             MedicinePresentationCopy.demoDisclaimer.isEmpty
+        )
+    }
+
+    /// The canonical raw disclaimer stays English: it is the medicine
+    /// pipeline's oracle and pass-through value, not a user-visible string.
+    func test_demoDisclaimer_canonicalRawStaysEnglish() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.demoDisclaimer,
+            "DEMO DATA — NOT FOR CLINICAL USE"
+        )
+    }
+
+    /// The known canonical disclaimer is localized to the Chinese sentence users
+    /// see; the raw value itself is unchanged.
+    func test_displayDisclaimer_localizesCanonicalToChinese() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayDisclaimer(
+                for: MedicinePresentationCopy.demoDisclaimer
+            ),
+            "演示数据，仅用于功能展示，不用于临床用途"
+        )
+    }
+
+    /// A non-canonical disclaimer must pass through unchanged — this layer never
+    /// rewrites medical wording it does not own — and `nil` maps to `nil`.
+    func test_displayDisclaimer_passesUnknownDisclaimerThroughUnchanged() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayDisclaimer(
+                for: "some other disclaimer"
+            ),
+            "some other disclaimer"
+        )
+        XCTAssertNil(
+            MedicinePresentationCopy.displayDisclaimer(for: nil)
+        )
+    }
+
+    /// The assessment page routes its disclaimer through the single mapping
+    /// function instead of hardcoding the Chinese sentence in the view.
+    func test_assessmentView_routesDisclaimerThroughDisplayMapping() throws {
+        let source = try assessmentViewSource()
+        XCTAssertTrue(
+            source.contains("MedicinePresentationCopy.displayDisclaimer")
         )
     }
 
@@ -360,6 +403,87 @@ final class AccessibilityValueTests: XCTestCase {
                 "No medicine assessment has been started."
             )
         )
+    }
+
+    /// The medicine result page must not show English section headings or
+    /// English attention semantics. These are the labels a person reads on the
+    /// result page, so they follow the app's Chinese localization like the
+    /// rest of the companion flow.
+    func test_resultPageHeadingsAndAttentionAreLocalizedToChinese() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.riskLevelHeading,
+            "风险等级"
+        )
+        XCTAssertEqual(
+            MedicinePresentationCopy.primaryInstructionHeading,
+            "接下来怎么做"
+        )
+        XCTAssertEqual(
+            MedicinePresentationCopy.warningsHeading,
+            "注意事项"
+        )
+        XCTAssertEqual(
+            MedicinePresentationCopy.recommendedActionsHeading,
+            "建议措施"
+        )
+        XCTAssertEqual(
+            MedicinePresentationCopy.sourceReferencesHeading,
+            "信息来源"
+        )
+        XCTAssertEqual(
+            MedicinePresentationCopy.confirmationRequiredHeading,
+            "药品身份未确认"
+        )
+
+        XCTAssertEqual(
+            MedicinePresentationCopy.attentionName(.routine),
+            "日常注意"
+        )
+        XCTAssertEqual(
+            MedicinePresentationCopy.attentionName(.reviewRequired),
+            "需要复核"
+        )
+        XCTAssertEqual(
+            MedicinePresentationCopy.attentionName(.urgentAttention),
+            "紧急关注"
+        )
+        XCTAssertEqual(
+            MedicinePresentationCopy.attentionName(.immediateAttention),
+            "立即关注"
+        )
+
+        // The English headings must not survive anywhere in the copy that
+        // renders them on the result page.
+        let englishLeftovers = [
+            "Risk level",
+            "What to do next",
+            "Warnings",
+            "Recommended actions",
+            "Information sources",
+            "Medicine identity not confirmed",
+            "Review required",
+            "Routine attention",
+            "Urgent attention",
+            "Immediate attention",
+        ]
+        let renderedCopy: [String] = [
+            MedicinePresentationCopy.riskLevelHeading,
+            MedicinePresentationCopy.primaryInstructionHeading,
+            MedicinePresentationCopy.warningsHeading,
+            MedicinePresentationCopy.recommendedActionsHeading,
+            MedicinePresentationCopy.sourceReferencesHeading,
+            MedicinePresentationCopy.confirmationRequiredHeading,
+            MedicinePresentationCopy.attentionName(.routine),
+            MedicinePresentationCopy.attentionName(.reviewRequired),
+            MedicinePresentationCopy.attentionName(.urgentAttention),
+            MedicinePresentationCopy.attentionName(.immediateAttention),
+        ]
+        for english in englishLeftovers {
+            XCTAssertFalse(
+                renderedCopy.contains(english),
+                "English heading \"\(english)\" still rendered on the result page"
+            )
+        }
     }
 
     // MARK: - mustConfirmMedicine independent label
@@ -473,5 +597,291 @@ final class AccessibilityValueTests: XCTestCase {
             MedicinePresentationCopy
                 .noSourceReferencesText.isEmpty
         )
+    }
+
+    // MARK: - Display mapping: medicine name
+
+    func test_displayMedicineName_mapsAcetaminophenToChinese() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayMedicineName(
+                "Acetaminophen"
+            ),
+            "对乙酰氨基酚"
+        )
+    }
+
+    func test_displayMedicineName_passesUnknownThrough() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayMedicineName(
+                "Ibuprofen"
+            ),
+            "Ibuprofen"
+        )
+    }
+
+    func test_displayMedicineName_nilReturnsNil() {
+        XCTAssertNil(
+            MedicinePresentationCopy.displayMedicineName(nil)
+        )
+    }
+
+    /// The canonical raw value used by the medicine pipeline is never
+    /// overwritten by the display mapping.
+    func test_displayMedicineName_canonicalRawIsUnchanged() {
+        let canonical = "Acetaminophen"
+        _ = MedicinePresentationCopy.displayMedicineName(canonical)
+        XCTAssertEqual(canonical, "Acetaminophen")
+    }
+
+    // MARK: - Display mapping: primary instruction
+
+    func test_displayPrimaryInstruction_mapsKnownToChinese() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayPrimaryInstruction(
+                "Review the verified source information before use."
+            ),
+            "使用前请核对已验证的信息来源。"
+        )
+    }
+
+    func test_displayPrimaryInstruction_passesUnknownThrough() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayPrimaryInstruction(
+                "Some other instruction."
+            ),
+            "Some other instruction."
+        )
+    }
+
+    func test_displayPrimaryInstruction_nilReturnsNil() {
+        XCTAssertNil(
+            MedicinePresentationCopy.displayPrimaryInstruction(nil)
+        )
+    }
+
+    // MARK: - Display mapping: source document title
+
+    func test_displayDocumentTitle_mapsRealDocumentTitleToChinese() {
+        // The real documentTitle from the demo catalog is the same as the
+        // canonical demo disclaimer, NOT a composite sourceName + title.
+        let realDocumentTitle = "DEMO DATA — NOT FOR CLINICAL USE"
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayDocumentTitle(
+                realDocumentTitle
+            ),
+            "演示数据，仅用于功能展示，不用于临床用途"
+        )
+    }
+
+    func test_displayDocumentTitle_passesUnknownThrough() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayDocumentTitle(
+                "Some other title"
+            ),
+            "Some other title"
+        )
+    }
+
+    func test_displaySourceSummary_exactPairMatchReturnsFullChinese() {
+        let reference = SourceReference(
+            sourceName: "SlowWalk Synthetic Demo Catalog",
+            documentTitle: "DEMO DATA — NOT FOR CLINICAL USE",
+            optionalURL: nil,
+            retrievedAt: Date(),
+            versionOrDate: "slowwalk-demo-catalog-v1"
+        )
+        let summary = MedicinePresentationCopy
+            .displaySourceSummary(reference)
+        XCTAssertEqual(
+            summary,
+            "SlowWalk 演示药品目录 — 演示数据，仅用于功能展示，不用于临床用途"
+        )
+        XCTAssertFalse(summary.contains("DEMO DATA"))
+        XCTAssertFalse(summary.contains("Synthetic Demo Catalog"))
+    }
+
+    func test_displaySourceSummary_unknownSourceNamePassesThrough() {
+        let reference = SourceReference(
+            sourceName: "Some Unknown Source",
+            documentTitle: "Some Unknown Title",
+            optionalURL: nil,
+            retrievedAt: Date(),
+            versionOrDate: "v1"
+        )
+        let summary = MedicinePresentationCopy
+            .displaySourceSummary(reference)
+        XCTAssertTrue(summary.contains("Some Unknown Source"))
+        XCTAssertTrue(summary.contains("Some Unknown Title"))
+    }
+
+    func test_displaySourceSummary_knownSourceNameUnknownDocumentTitleDoesNotTriggerDemoMapping() {
+        // The exact pair match requires BOTH fields, so a known sourceName
+        // with an unknown documentTitle must not trigger the demo mapping.
+        let reference = SourceReference(
+            sourceName: "SlowWalk Synthetic Demo Catalog",
+            documentTitle: "Some Other Title",
+            optionalURL: nil,
+            retrievedAt: Date(),
+            versionOrDate: "v1"
+        )
+        let summary = MedicinePresentationCopy
+            .displaySourceSummary(reference)
+        XCTAssertTrue(summary.contains("SlowWalk Synthetic Demo Catalog"))
+        XCTAssertTrue(summary.contains("Some Other Title"))
+        XCTAssertFalse(summary.contains("SlowWalk 演示药品目录"))
+    }
+
+    func test_displaySourceSummary_unknownSourceNameKnownDisclaimerDocumentTitleOnlyMapsTitle() {
+        // When only the documentTitle matches the known disclaimer but the
+        // sourceName is unknown, only the title portion is mapped; the
+        // sourceName is NOT rewritten to the demo catalog name.
+        let reference = SourceReference(
+            sourceName: "Some External Source",
+            documentTitle: "DEMO DATA — NOT FOR CLINICAL USE",
+            optionalURL: nil,
+            retrievedAt: Date(),
+            versionOrDate: "v1"
+        )
+        let summary = MedicinePresentationCopy
+            .displaySourceSummary(reference)
+        XCTAssertTrue(summary.contains("Some External Source"))
+        XCTAssertTrue(summary.contains("演示数据"))
+        XCTAssertFalse(summary.contains("SlowWalk 演示药品目录"))
+        XCTAssertFalse(summary.contains("DEMO DATA"))
+    }
+
+    // MARK: - Display mapping: non-green primary instructions (P2)
+
+    func test_displayPrimaryInstruction_mapsYellowToChinese() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayPrimaryInstruction(
+                "Pause and review the available information."
+            ),
+            "请暂停并查看现有信息。"
+        )
+    }
+
+    func test_displayPrimaryInstruction_mapsOrangeToChinese() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayPrimaryInstruction(
+                "Review the medication history with a healthcare professional."
+            ),
+            "请与医护人员核对用药记录。"
+        )
+    }
+
+    func test_displayPrimaryInstruction_mapsRedToChinese() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayPrimaryInstruction(
+                "Do not take this medicine until a healthcare professional confirms the next step."
+            ),
+            "在医护人员确认之前，请勿服用此药品。"
+        )
+    }
+
+    func test_displayPrimaryInstruction_mapsConfirmationCardToChinese() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayPrimaryInstruction(
+                "Retake a clear photo of the front of the medicine box."
+            ),
+            "请重新拍摄药品包装盒正面清晰照片。"
+        )
+    }
+
+    // MARK: - Display mapping: confirmation card title (P2)
+
+    func test_displayMedicineName_mapsConfirmationCardTitleToChinese() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayMedicineName(
+                "Unable to confirm the medicine"
+            ),
+            "无法确认药品身份"
+        )
+    }
+
+    // MARK: - Display mapping: canonical warnings (P2)
+
+    func test_displayWarning_mapsIdentityWarningToChinese() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayWarning(
+                "Do not take this medicine until its identity is confirmed."
+            ),
+            "药品身份确认前请勿服用。"
+        )
+    }
+
+    func test_displayWarning_mapsResolutionWarningsToChinese() {
+        let pairs: [(String, String)] = [
+            (
+                "A risk assessment is not available for the resolved medicine.",
+                "未能获取已识别药品的风险评估结果。"
+            ),
+            (
+                "More than one medicine matched the recognized text.",
+                "识别文字匹配到多个可能的药品。"
+            ),
+            (
+                "The available recognition evidence is insufficient.",
+                "当前识别证据不足以确认药品。"
+            ),
+            (
+                "No medicine in the verified data matched the recognized text.",
+                "已验证数据中未找到与识别文字匹配的药品。"
+            ),
+            (
+                "The medicine text could not be recognized reliably.",
+                "未能可靠识别药品标签文字。"
+            ),
+        ]
+        for (english, chinese) in pairs {
+            XCTAssertEqual(
+                MedicinePresentationCopy.displayWarning(english),
+                chinese
+            )
+        }
+    }
+
+    func test_displayWarning_passesUnknownThrough() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayWarning(
+                "Some unknown warning"
+            ),
+            "Some unknown warning"
+        )
+    }
+
+    func test_displayWarning_nilReturnsNil() {
+        XCTAssertNil(
+            MedicinePresentationCopy.displayWarning(nil)
+        )
+    }
+
+    func test_displayWarning_mapsDemoDisclaimerToChinese() {
+        XCTAssertEqual(
+            MedicinePresentationCopy.displayWarning(
+                "DEMO DATA — NOT FOR CLINICAL USE"
+            ),
+            "演示数据，仅用于功能展示，不用于临床用途"
+        )
+    }
+
+    // MARK: - MedicineAssessmentView display guard (P1-2)
+
+    func test_assessmentView_routesResolvedMedicineNameThroughDisplayMapping() throws {
+        let source = try assessmentViewSource()
+        // The recognition section must route the resolved medicine name
+        // through displayMedicineName, not render it raw.
+        XCTAssertTrue(
+            source.contains("displayMedicineName(medicineName)"),
+            "MedicineAssessmentView must use displayMedicineName for the resolved medicine name"
+        )
+    }
+
+    /// The canonical raw value "Acetaminophen" is never mutated by the
+    /// display layer.
+    func test_canonicalAcetaminophen_staysUnchanged() {
+        let canonical = "Acetaminophen"
+        _ = MedicinePresentationCopy.displayMedicineName(canonical)
+        XCTAssertEqual(canonical, "Acetaminophen")
     }
 }

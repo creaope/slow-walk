@@ -8,9 +8,9 @@ struct DemoDataBanner: View {
     var body: some View {
         Label {
             VStack(alignment: .leading, spacing: 2) {
-                Text(CompanionCopy.demoDataNotice)
+                Text("演示数据")
                     .font(.headline)
-                Text("演示数据，不用于临床用途")
+                Text("仅用于功能展示，不用于临床用途")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
             }
@@ -21,9 +21,7 @@ struct DemoDataBanner: View {
                 .accessibilityHidden(true)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel(
-            "\(CompanionCopy.demoDataNotice)。演示数据，不用于临床用途。"
-        )
+        .accessibilityLabel("演示数据。仅用于功能展示，不用于临床用途。")
     }
 }
 
@@ -31,13 +29,11 @@ struct DemoDataBanner: View {
 /// compete with the page's primary content.
 struct DemoDataFooter: View {
     var body: some View {
-        Text("\(CompanionCopy.demoDataNotice) · 演示数据，不用于临床用途")
+        Text("演示数据，仅用于功能展示，不用于临床用途")
             .font(.footnote)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
-            .accessibilityLabel(
-                "\(CompanionCopy.demoDataNotice)。演示数据，不用于临床用途。"
-            )
+            .accessibilityLabel("演示数据，仅用于功能展示，不用于临床用途。")
     }
 }
 

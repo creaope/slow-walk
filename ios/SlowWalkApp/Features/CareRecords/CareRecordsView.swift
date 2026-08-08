@@ -1,4 +1,5 @@
 import SwiftUI
+import SlowWalkPresentation
 
 /// The factual timeline of one companion session.
 struct CareRecordsView: View {
@@ -44,13 +45,13 @@ struct CareRecordsView: View {
 
             Section {
                 LabeledContent {
-                    Text(persistenceStatus.shortLabel)
+                    Text("本次运行内保存")
                         .foregroundStyle(.secondary)
                 } label: {
                     Label("保存方式", systemImage: "internaldrive")
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(persistenceStatus.summaryLine)
+                .accessibilityLabel("保存方式：本次运行内保存。")
                 .slowWalkReadableContent()
             } header: {
                 Text("记录保存")
@@ -130,14 +131,14 @@ struct CareRecordsView: View {
         case let .medicineConfirmed(medicineName, origin):
             switch origin {
             case .readFromPhoto:
-                "已确认药名：\(medicineName)"
+                "已确认药名：\(MedicinePresentationCopy.displayMedicineName(medicineName) ?? medicineName)"
             case .chosenFromFrequentList:
-                "已确认药名：\(medicineName)（从常用药名选择）"
+                "已确认药名：\(MedicinePresentationCopy.displayMedicineName(medicineName) ?? medicineName)（从常用药名选择）"
             }
         case .medicineAssessmentDidNotSucceed:
             "用药评估未能完成，未显示用药提示"
         case let .careActionShown(medicineName):
-            "已显示\(medicineName)的用药提示"
+            "已显示\(MedicinePresentationCopy.displayMedicineName(medicineName) ?? medicineName)的用药提示"
         case let .companionFinished(completion):
             switch completion {
             case .arrivedSafely:

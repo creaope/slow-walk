@@ -90,24 +90,30 @@ struct CareSettingsView: View {
                 .fixedSize(horizontal: false, vertical: true)
             }
 
-            Section {
-                capabilityRow(
-                    contactStatus,
-                    title: "信任联系人",
-                    systemImage: "person.crop.circle.badge.exclamationmark"
-                )
+            if contactStatus.availability != .unavailable || persistenceStatus.availability != .unavailable {
+                Section {
+                    if contactStatus.availability != .unavailable {
+                        capabilityRow(
+                            contactStatus,
+                            title: "信任联系人",
+                            systemImage: "person.crop.circle.badge.exclamationmark"
+                        )
+                    }
 
-                capabilityRow(
-                    persistenceStatus,
-                    title: "守护记录",
-                    systemImage: "internaldrive"
-                )
-            } header: {
-                Text("关怀与数据")
-            } footer: {
-                if !capabilityDetails.isEmpty {
-                    Text(capabilityDetails)
-                        .fixedSize(horizontal: false, vertical: true)
+                    if persistenceStatus.availability != .unavailable {
+                        capabilityRow(
+                            persistenceStatus,
+                            title: "守护记录",
+                            systemImage: "internaldrive"
+                        )
+                    }
+                } header: {
+                    Text("关怀与数据")
+                } footer: {
+                    if !capabilityDetails.isEmpty {
+                        Text(capabilityDetails)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
                 }
             }
 
@@ -129,8 +135,9 @@ struct CareSettingsView: View {
     }
 
     private var capabilityDetails: String {
-        [contactStatus.detail, persistenceStatus.detail]
-            .compactMap(\.self)
+        [contactStatus, persistenceStatus]
+            .filter { $0.availability != .unavailable }
+            .compactMap(\.detail)
             .joined(separator: " ")
     }
 

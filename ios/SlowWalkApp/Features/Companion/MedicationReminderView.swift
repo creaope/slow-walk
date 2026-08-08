@@ -52,7 +52,7 @@ struct MedicationReminderView: View {
 
             Section {
                 LabeledContent {
-                    Text(reminderStatus.shortLabel)
+                    Text("演示提醒")
                         .foregroundStyle(.secondary)
                 } label: {
                     Label(
@@ -61,15 +61,13 @@ struct MedicationReminderView: View {
                     )
                 }
                 .accessibilityElement(children: .ignore)
-                .accessibilityLabel(reminderStatus.summaryLine)
+                .accessibilityLabel(reminderAccessibilityLabel)
                 .slowWalkReadableContent()
             } header: {
                 Text("提醒状态")
             } footer: {
-                if let detail = reminderStatus.detail {
-                    Text(detail)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                Text("当前为演示安排，不会发送系统通知。")
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             Section {
@@ -104,6 +102,13 @@ struct MedicationReminderView: View {
         } else {
             "今天还有 \(pendingMedicines.count) 项待完成"
         }
+    }
+
+    /// Honest VoiceOver reading for the reminder-status row: it names the
+    /// capability, states it is a demo reminder, and is explicit that no system
+    /// notification is sent.
+    private var reminderAccessibilityLabel: String {
+        "\(reminderStatus.displayName)：演示提醒。当前为演示安排，不会发送系统通知。"
     }
 
     private func reminderRow(_ medicine: TodayMedicineItem) -> some View {

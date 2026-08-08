@@ -31,6 +31,9 @@ struct CompanionView: View {
         case reminders
         case intake
         case arrivalReminder
+        case demoRoute
+        case imageFeedback
+        case antiFraud
 
         var id: Self { self }
 
@@ -39,6 +42,9 @@ struct CompanionView: View {
             case .reminders: "用药提醒"
             case .intake: "用药录入"
             case .arrivalReminder: "开始完整陪伴"
+            case .demoRoute: CompanionDemoCopy.routeEntryTitle
+            case .imageFeedback: CompanionDemoCopy.imageFeedbackEntryTitle
+            case .antiFraud: CompanionDemoCopy.antiFraudEntryTitle
             }
         }
 
@@ -47,6 +53,9 @@ struct CompanionView: View {
             case .reminders: "查看今天的用药安排与提醒状态。"
             case .intake: "进入药品识别、安全检查和用药信息录入流程。"
             case .arrivalReminder: "先完成出发前检查，再进入到站提醒。"
+            case .demoRoute: CompanionDemoCopy.routeEntryHint
+            case .imageFeedback: CompanionDemoCopy.imageFeedbackEntryHint
+            case .antiFraud: CompanionDemoCopy.antiFraudEntryHint
             }
         }
     }
@@ -150,19 +159,23 @@ struct CompanionView: View {
 
             Section {
                 companionFeatureCard(
-                    title: "实景导航",
-                    detail: "用于未来的实景方向提示；当前版本不提供真实导航。",
+                    title: CompanionDemoCopy.routeCardTitle,
+                    detail: CompanionDemoCopy.routeCardDetail,
                     systemImage: "viewfinder",
-                    status: "尚未接入"
+                    status: CompanionDemoCopy.routeCardStatus
                 ) {
-                    Button {} label: {
-                        Label("暂不可用", systemImage: "lock")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .disabled(true)
-                    .accessibilityHint("当前版本尚未接入实景导航。")
+                    companionDestinationButton(.demoRoute)
+                }
+            }
+
+            Section {
+                companionFeatureCard(
+                    title: CompanionDemoCopy.imageFeedbackCardTitle,
+                    detail: CompanionDemoCopy.imageFeedbackCardDetail,
+                    systemImage: "photo",
+                    status: CompanionDemoCopy.imageFeedbackCardStatus
+                ) {
+                    companionDestinationButton(.imageFeedback)
                 }
             }
 
@@ -179,19 +192,12 @@ struct CompanionView: View {
 
             Section {
                 companionFeatureCard(
-                    title: "防诈守护",
-                    detail: "用于未来的可疑信息识别；当前版本尚未接入。",
+                    title: CompanionDemoCopy.antiFraudCardTitle,
+                    detail: CompanionDemoCopy.antiFraudCardDetail,
                     systemImage: "shield",
-                    status: "尚未接入"
+                    status: CompanionDemoCopy.antiFraudCardStatus
                 ) {
-                    Button {} label: {
-                        Label("暂不可用", systemImage: "lock")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
-                    .disabled(true)
-                    .accessibilityHint("当前版本尚未接入防诈识别。")
+                    companionDestinationButton(.antiFraud)
                 }
             }
 
@@ -305,6 +311,12 @@ struct CompanionView: View {
             medicineCompanionPage
                 .navigationTitle("完整陪伴")
                 .navigationBarTitleDisplayMode(.inline)
+        case .demoRoute:
+            DemoRouteView()
+        case .imageFeedback:
+            ImageFeedbackDemoView()
+        case .antiFraud:
+            AntiFraudDemoView()
         }
     }
 
@@ -852,7 +864,11 @@ struct CompanionView: View {
     ///
     /// No medicine conclusion is offered here — only ways forward.
     private var recoveryControls: some View {
-        ForEach(session.recoveryOptions) { option in
+        ForEach(
+            session.recoveryOptions.filter {
+                $0.isReachable(in: session.capabilities)
+            }
+        ) { option in
             switch option {
             case .retryPhoto:
                 primaryButton(
@@ -953,7 +969,10 @@ struct CompanionView: View {
                 confirmCanonicalMedicine(candidate)
             } label: {
                 Label(
-                    candidate.medicine.canonicalName,
+                    MedicinePresentationCopy
+                        .displayMedicineName(
+                            candidate.medicine.canonicalName
+                        ) ?? candidate.medicine.canonicalName,
                     systemImage: "pills"
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -962,7 +981,7 @@ struct CompanionView: View {
             .controlSize(.large)
             .frame(minHeight: SlowWalkLayout.minimumTapTarget)
             .accessibilityLabel(
-                "确认药名：\(candidate.medicine.canonicalName)"
+                "确认药名：\(MedicinePresentationCopy.displayMedicineName(candidate.medicine.canonicalName) ?? candidate.medicine.canonicalName)"
             )
             .accessibilityHint("使用这个候选药名继续评估。")
         }
@@ -1204,4 +1223,24 @@ private struct MedicineAssessmentGateReader<
             .navigationTitle("陪伴")
     }
     .environment(AppEnvironment.preview())
+}
+
+extension CompanionRecoveryOption {
+    /// Whether this recovery option can actually be used given the current
+    /// capabilities.
+    ///
+    /// `contactSomeone` needs trusted contacts to be available; the other two
+    /// options (`retryPhoto`, `chooseFromList`) are always available in the
+    /// demo. This lets the recovery list hide the contact path instead of
+    /// rendering it as a disabled placeholder when trusted contacts are not
+    /// implemented.
+    func isReachable(in capabilities: CapabilityCatalog) -> Bool {
+        switch self {
+        case .contactSomeone:
+            return capabilities.status(of: .trustedContacts).availability
+                != .unavailable
+        case .retryPhoto, .chooseFromList:
+            return true
+        }
+    }
 }

@@ -20,6 +20,19 @@ Python 标准库脚本生成，不包含网络图片、真实药盒、商标、�
 正式录屏只能使用 `approvedForRecording: true` 的 clean 图片。其余图片只用于离线测试
 不确定、歧义和降级路径。
 
+## Competition Presentation Asset（非 Fixture）
+
+`presentation/` 目录存放比赛展示专用素材，与 deterministic fixture 完全分离：
+
+| 文件 | 用途 | 来源 |
+| --- | --- | --- |
+| `presentation/acetaminophen-photoreal-v1.png` | 比赛视频 / 真机展示 | 外部合成（非确定性生成器） |
+
+此图片为 synthetic competition presentation asset，**不参与 deterministic
+automated-test fixture**，不在 `manifest.json` 中登记，也不被 validator 或
+generator 的 `--check` 校验。它仅供人工演示和录屏使用，不得作为离线测试 oracle、
+canonical pipeline 输入或识别基准。
+
 Acetaminophen 图片的 `expectedCanonicalMedicineID` 是现有 bundled demo catalog 中的
 `demo-acetaminophen`。歧义图片包含多个成分证据，字段为 `null`；Manifest 不创建、
 修改或替代 catalog 身份。
