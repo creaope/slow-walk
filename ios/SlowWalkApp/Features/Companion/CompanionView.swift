@@ -16,7 +16,44 @@ struct CompanionView: View {
         MedicineCapturePresentationLifecycle()
     @State private var medicineCaptureViewModel: MedicineCaptureViewModel?
     @State private var medicineCaptureViewModelToken: UUID?
+    @State private var companionDestination: CompanionDestination?
+    @State private var isEndEarlyConfirmationPresented = false
+    @AccessibilityFocusState private var accessibilityFocus:
+        AccessibilityFocusTarget?
     private let sessionOverride: CompanionSessionModel?
+
+    private enum AccessibilityFocusTarget: Hashable {
+        case step
+        case assessment
+    }
+
+    private enum CompanionDestination: Hashable, Identifiable {
+        case reminders
+        case intake
+        case arrivalReminder
+
+        var id: Self { self }
+
+        var title: String {
+            switch self {
+            case .reminders: "用药提醒"
+            case .intake: "用药录入"
+            case .arrivalReminder: "开始完整陪伴"
+            }
+        }
+
+        var accessibilityHint: String {
+            switch self {
+            case .reminders: "查看今天的用药安排与提醒状态。"
+            case .intake: "进入药品识别、安全检查和用药信息录入流程。"
+            case .arrivalReminder: "先完成出发前检查，再进入到站提醒。"
+            }
+        }
+    }
+
+    private static let medicineCompanionDestinations: [
+        CompanionDestination
+    ] = [.reminders, .intake]
 
     init(session: CompanionSessionModel? = nil) {
         sessionOverride = session
@@ -28,85 +65,333 @@ struct CompanionView: View {
 
     var body: some View {
         rootContent
-            .fullScreenCover(
-                isPresented: isMedicineCapturePresented,
-                onDismiss: { completeMedicineCaptureDismissal() }
-            ) {
-                if let identity = medicineCapturePresentation.current,
-                   identity.viewModelToken == medicineCaptureViewModelToken,
-                   let medicineCaptureViewModel
-                {
-                    MedicineCaptureView(viewModel: medicineCaptureViewModel)
-                        .onDisappear {
-                            medicineCapturePresentation.requestDismissal(
-                                for: identity
-                            )
-                        }
-                }
-            }
             .onChange(of: session.currentAssessmentGateLease) {
                 oldLease, newLease in
                 medicineCapturePresentation.gateLeaseDidChange(
                     from: oldLease,
                     to: newLease
                 )
+                if !medicineCapturePresentation.isPresented {
+                    completeMedicineCaptureDismissal()
+                }
+            }
+            .onChange(of: session.state) { _, newState in
+                moveAccessibilityFocus(for: newState)
+            }
+            .alert(
+                CompanionCopy.endEarlyTitle,
+                isPresented: $isEndEarlyConfirmationPresented
+            ) {
+                Button("继续陪伴", role: .cancel) {}
+                Button("确认结束", role: .destructive) {
+                    session.endEarly()
+                }
+            } message: {
+                Text("结束后不会继续后面的步骤。")
             }
     }
 
-    @ViewBuilder
     private var rootContent: some View {
-        switch session.state {
-        case let .awaitingMedicineAssessment(gate):
-            assessmentPage(gate)
-        default:
-            companionFlowPage
+        companionHubPage
+            .navigationDestination(item: $companionDestination) {
+                destination in
+                companionDestinationView(destination)
+            }
+    }
+
+    private var medicineCompanionPage: some View {
+        Group {
+            if medicineCapturePresentation.isAssessmentPresented {
+                activeMedicineAssessmentPage
+            } else {
+                companionFlowPage
+            }
+        }
+        .navigationTitle("用药录入")
+        .navigationBarTitleDisplayMode(.inline)
+    }
+
+    private var companionHubPage: some View {
+        List {
+            if case .completed = session.state {
+                Section("最近一次") {
+                    LabeledContent("状态", value: session.stepLabel)
+                        .accessibilityElement(children: .ignore)
+                        .accessibilityLabel(
+                            "最近一次陪伴，\(session.stepLabel)"
+                        )
+                        .slowWalkReadableContent()
+
+                    Label {
+                        Text(session.situation)
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "checkmark.circle")
+                            .foregroundStyle(.tint)
+                            .accessibilityHidden(true)
+                    }
+                    .accessibilityElement(children: .combine)
+                    .slowWalkReadableContent()
+                }
+            }
+
+            Section {
+                companionFeatureCard(
+                    title: "用药陪伴",
+                    detail: "查看今天的提醒，或录入药品并完成安全检查。",
+                    systemImage: "pills",
+                    status: nil
+                ) {
+                    medicineCompanionEntryButtons
+                }
+            } header: {
+                Text("陪伴功能")
+            }
+
+            Section {
+                companionFeatureCard(
+                    title: "实景导航",
+                    detail: "用于未来的实景方向提示；当前版本不提供真实导航。",
+                    systemImage: "viewfinder",
+                    status: "尚未接入"
+                ) {
+                    Button {} label: {
+                        Label("暂不可用", systemImage: "lock")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .disabled(true)
+                    .accessibilityHint("当前版本尚未接入实景导航。")
+                }
+            }
+
+            Section {
+                companionFeatureCard(
+                    title: "到站提醒",
+                    detail: "完成出发前检查后，进入演示出行与到站提醒。",
+                    systemImage: "bell.badge",
+                    status: "流程内演示"
+                ) {
+                    companionDestinationButton(.arrivalReminder)
+                }
+            }
+
+            Section {
+                companionFeatureCard(
+                    title: "防诈守护",
+                    detail: "用于未来的可疑信息识别；当前版本尚未接入。",
+                    systemImage: "shield",
+                    status: "尚未接入"
+                ) {
+                    Button {} label: {
+                        Label("暂不可用", systemImage: "lock")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.large)
+                    .disabled(true)
+                    .accessibilityHint("当前版本尚未接入防诈识别。")
+                }
+            }
+
+            Section {
+                NotADiagnosisNotice()
+                    .slowWalkReadableContent()
+            } header: {
+                Text("安全提醒")
+            } footer: {
+                DemoDataFooter()
+            }
+        }
+        .listStyle(.insetGrouped)
+        .listSectionSpacing(12)
+    }
+
+    private func companionFeatureCard<ActionContent: View>(
+        title: String,
+        detail: String,
+        systemImage: String,
+        status: String?,
+        @ViewBuilder action: () -> ActionContent
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.headline)
+                    if let status {
+                        Text(status)
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            } icon: {
+                Image(systemName: systemImage)
+                    .font(.title2)
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(
+                [title, status].compactMap(\.self).joined(separator: "，")
+            )
+
+            Text(detail)
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Spacer(minLength: 4)
+
+            action()
+        }
+        .frame(maxWidth: .infinity, minHeight: 196, alignment: .topLeading)
+        .listRowInsets(
+            EdgeInsets(top: 16, leading: 16, bottom: 16, trailing: 16)
+        )
+    }
+
+    private var medicineCompanionEntryButtons: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 12) {
+                ForEach(Self.medicineCompanionDestinations) { destination in
+                    companionDestinationButton(destination)
+                }
+            }
+
+            VStack(spacing: 12) {
+                ForEach(Self.medicineCompanionDestinations) { destination in
+                    companionDestinationButton(destination)
+                }
+            }
+        }
+    }
+
+    private func companionDestinationButton(
+        _ destination: CompanionDestination
+    ) -> some View {
+        Button {
+            companionDestination = destination
+        } label: {
+            Text(destination.title)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.borderedProminent)
+        .tint(Color.accentColor)
+        .controlSize(.large)
+        .frame(maxWidth: .infinity)
+        .frame(minHeight: SlowWalkLayout.minimumTapTarget)
+        .accessibilityHint(destination.accessibilityHint)
+    }
+
+    @ViewBuilder
+    private func companionDestinationView(
+        _ destination: CompanionDestination
+    ) -> some View {
+        switch destination {
+        case .reminders:
+            MedicationReminderView(
+                medicines: environment.plan.medicines,
+                reminderStatus: environment.capabilities.status(
+                    of: .medicationReminder
+                )
+            )
+        case .intake:
+            medicineCompanionPage
+        case .arrivalReminder:
+            medicineCompanionPage
+                .navigationTitle("完整陪伴")
+                .navigationBarTitleDisplayMode(.inline)
         }
     }
 
     private var companionFlowPage: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                DemoDataBanner()
-                stepHeader
-                stepControls
-                if session.canEndEarly {
-                    endEarlyButton
-                }
-                NotADiagnosisNotice()
+        List {
+            Section("当前步骤") {
+                stepSummary
+                    .slowWalkReadableContent()
             }
-            .padding()
+
+            stepControls
+
+            if session.canEndEarly {
+                Section {
+                    endEarlyButton
+                        .slowWalkReadableContent()
+                }
+            }
+
+            Section {
+                NotADiagnosisNotice()
+                    .slowWalkReadableContent()
+            } header: {
+                Text("安全提醒")
+            } footer: {
+                DemoDataFooter()
+            }
         }
+        .listStyle(.insetGrouped)
     }
 
     // MARK: - Medicine assessment
 
+    var activeMedicineAssessmentPage: some View {
+        MedicineAssessmentGateReader(session: session) { gate in
+            assessmentPage(
+                gate,
+                retryAction: { returnToMedicineCapture() }
+            )
+        } unavailable: {
+            ContentUnavailableView {
+                Label("识别已结束", systemImage: "checkmark.circle")
+            } description: {
+                Text("返回陪伴页查看当前状态。")
+            }
+        }
+    }
+
     private func assessmentPage(
-        _ gate: MedicineAssessmentGate
+        _ gate: MedicineAssessmentGate,
+        retryAction: @escaping () -> Void
     ) -> some View {
         let page = AssessmentPagePresentation(gate.assessmentState)
 
         return assessmentPresentation(
             gate: gate,
-            displayState: page.displayState
+            displayState: page.displayState,
+            retryAction: retryAction
         )
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            assessmentActions(gate)
-        }
+        .accessibilityFocused(
+            $accessibilityFocus,
+            equals: .assessment
+        )
+        .slowWalkReadableContent()
     }
 
     @ViewBuilder
     private func assessmentPresentation(
         gate: MedicineAssessmentGate,
-        displayState: MedicineDisplayState
+        displayState: MedicineDisplayState,
+        retryAction: @escaping () -> Void
     ) -> some View {
         switch AssessmentPresentationIdentity(gate.assessmentState) {
         case let .result(requestID):
             MedicineAssessmentView(
                 state: displayState,
-                retryAction: {
-                    presentMedicineCapture()
+                retryAction: retryAction,
+                confirmAction: nil,
+                contextContent: {
+                    assessmentContextSection
                 },
-                confirmAction: nil
+                actionContent: {
+                    assessmentActionSections(
+                        gate,
+                        retryAction: retryAction
+                    )
+                }
             )
             .id(requestID)
             .onAppear {
@@ -118,57 +403,112 @@ struct CompanionView: View {
         case .nonResult:
             MedicineAssessmentView(
                 state: displayState,
-                retryAction: {
-                    presentMedicineCapture()
+                retryAction: retryAction,
+                confirmAction: nil,
+                contextContent: {
+                    assessmentContextSection
                 },
-                confirmAction: nil
+                actionContent: {
+                    assessmentActionSections(
+                        gate,
+                        retryAction: retryAction
+                    )
+                }
             )
         }
     }
 
-    private func assessmentActions(
-        _ gate: MedicineAssessmentGate
+    private var assessmentContextSection: some View {
+        Section("当前步骤") {
+            stepSummary
+                .slowWalkReadableContent()
+        }
+    }
+
+    @ViewBuilder
+    private func assessmentActionSections(
+        _ gate: MedicineAssessmentGate,
+        retryAction: @escaping () -> Void
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            if let confirmation = CanonicalCandidateConfirmation(
-                gate.assessmentState
-            ) {
+        let confirmation = CanonicalCandidateConfirmation(
+            gate.assessmentState
+        )
+        let continuation = AssessmentContinuation(
+            canDepart: session.canDepart,
+            canCompleteMedicineCheck: session.canCompleteMedicineCheck
+        )
+
+        if let confirmation {
+            Section("请选择药名") {
                 canonicalCandidateControls(confirmation.candidates)
             }
 
-            if let continuation = AssessmentContinuation(
-                canDepart: session.canDepart,
-                canCompleteMedicineCheck: session.canCompleteMedicineCheck
-            ) {
-                primaryButton(continuation.title) {
+            Section("其他方式") {
+                secondaryButton(
+                    CompanionCopy.retryPhotoTitle,
+                    systemImage: "camera"
+                ) {
+                    retryAction()
+                }
+            }
+        } else if let continuation {
+            Section {
+                primaryButton(
+                    continuation.title,
+                    systemImage: "arrow.forward.circle"
+                ) {
                     _ = continuation.perform(on: session)
                 }
-            }
 
-            if gate.preAssessmentSelection == nil {
-                secondaryButton(CompanionCopy.chooseFromListTitle) {
-                    session.chooseFromFrequentList()
-                }
-            } else {
-                secondaryButton(CompanionCopy.reconsiderMedicineTitle) {
-                    session.reconsiderMedicineChoice()
-                }
+                medicineSelectionButton(for: gate)
             }
-
-            if presentationShowsRetry(for: gate.assessmentState) == false {
-                secondaryButton(CompanionCopy.retryPhotoTitle) {
-                    presentMedicineCapture()
-                }
+        } else if presentationShowsRetry(for: gate.assessmentState) {
+            Section("其他方式") {
+                medicineSelectionButton(for: gate)
             }
+        } else {
+            Section("下一步") {
+                primaryButton(
+                    CompanionCopy.retryPhotoTitle,
+                    systemImage: "camera"
+                ) {
+                    retryAction()
+                }
 
-            if session.canEndEarly {
+                medicineSelectionButton(for: gate)
+            }
+        }
+
+        if session.canEndEarly {
+            Section {
                 endEarlyButton
             }
+        }
 
+        Section("安全提醒") {
             NotADiagnosisNotice()
         }
-        .padding(20)
-        .background(.background)
+    }
+
+    @ViewBuilder
+    private func medicineSelectionButton(
+        for gate: MedicineAssessmentGate
+    ) -> some View {
+        if gate.preAssessmentSelection == nil {
+            secondaryButton(
+                CompanionCopy.chooseFromListTitle,
+                systemImage: "list.bullet"
+            ) {
+                session.chooseFromFrequentList()
+            }
+        } else {
+            secondaryButton(
+                CompanionCopy.reconsiderMedicineTitle,
+                systemImage: "arrow.triangle.2.circlepath"
+            ) {
+                session.reconsiderMedicineChoice()
+            }
+        }
     }
 
     private func presentationShowsRetry(
@@ -247,6 +587,7 @@ struct CompanionView: View {
     struct MedicineCapturePresentationLifecycle {
         private(set) var current: MedicineCapturePresentationIdentity?
         private(set) var isPresented = false
+        private(set) var isAssessmentPresented = false
         private var pendingDismissals: [MedicineCapturePresentationIdentity] = []
 
         mutating func present(
@@ -254,10 +595,11 @@ struct CompanionView: View {
         ) {
             current = identity
             isPresented = true
+            isAssessmentPresented = false
         }
 
         @discardableResult
-        mutating func assessmentSubmissionAccepted(
+        mutating func inputSubmissionStarted(
             for identity: MedicineCapturePresentationIdentity,
             currentGateLease: MedicineAssessmentGateLease?,
             currentViewModelToken: UUID?
@@ -268,7 +610,20 @@ struct CompanionView: View {
                   currentViewModelToken == identity.viewModelToken
             else { return false }
 
-            requestDismissal(for: identity)
+            isAssessmentPresented = true
+            return true
+        }
+
+        @discardableResult
+        mutating func returnToCapture(
+            for identity: MedicineCapturePresentationIdentity
+        ) -> Bool {
+            guard isPresented,
+                  current == identity,
+                  isAssessmentPresented
+            else { return false }
+
+            isAssessmentPresented = false
             return true
         }
 
@@ -296,6 +651,7 @@ struct CompanionView: View {
             if !pendingDismissals.contains(identity) {
                 pendingDismissals.append(identity)
             }
+            isAssessmentPresented = false
             isPresented = false
         }
 
@@ -306,6 +662,7 @@ struct CompanionView: View {
             if current == dismissed {
                 current = nil
                 isPresented = false
+                isAssessmentPresented = false
             }
             return dismissed
         }
@@ -350,42 +707,52 @@ struct CompanionView: View {
         }
     }
 
-    // MARK: - Header
+    // MARK: - Step summary
 
-    private var stepHeader: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(session.stepLabel)
-                .font(.title2)
-                .fontWeight(.semibold)
+    private var stepSummary: some View {
+        Group {
+            LabeledContent("进度", value: session.stepLabel)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("当前步骤，\(session.stepLabel)")
+                .accessibilityFocused(
+                    $accessibilityFocus,
+                    equals: .step
+                )
 
-            Text(session.situation)
-                .font(.body)
-                .fixedSize(horizontal: false, vertical: true)
+            Label {
+                Text(session.situation)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "info.circle")
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+            }
+            .accessibilityElement(children: .combine)
 
-            Text(session.nextStep)
-                .font(.body)
-                .fontWeight(.medium)
-                .fixedSize(horizontal: false, vertical: true)
+            Label {
+                Text(session.nextStep)
+                    .fontWeight(.semibold)
+                    .fixedSize(horizontal: false, vertical: true)
+            } icon: {
+                Image(systemName: "arrow.forward.circle.fill")
+                    .foregroundStyle(.tint)
+                    .accessibilityHidden(true)
+            }
+            .accessibilityElement(children: .combine)
 
             if let reason = session.reason {
-                Text(reason)
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+                Label {
+                    Text(reason)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                } icon: {
+                    Image(systemName: "questionmark.circle")
+                        .foregroundStyle(.secondary)
+                        .accessibilityHidden(true)
+                }
+                .accessibilityElement(children: .combine)
             }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(
-            [
-                session.stepLabel,
-                session.situation,
-                session.nextStep,
-                session.reason,
-            ]
-            .compactMap(\.self)
-            .joined(separator: " ")
-        )
     }
 
     // MARK: - Step controls
@@ -394,150 +761,210 @@ struct CompanionView: View {
     private var stepControls: some View {
         switch session.state {
         case .notStarted:
-            primaryButton(CompanionCopy.startCompanionTitle) {
-                beginMedicineCapture(startingSession: true)
+            Section("选择识别方式") {
+                medicineCaptureSourceActions(startingSession: true)
             }
 
         case .preDepartureCheck:
-            primaryButton(CompanionCopy.beginMedicineReadTitle) {
-                beginMedicineCapture()
-            }
-            secondaryButton(CompanionCopy.chooseFromListTitle) {
-                session.chooseFromFrequentList()
+            Section("选择确认方式") {
+                medicineCaptureSourceActions(startingSession: false)
+
+                secondaryButton(
+                    CompanionCopy.chooseFromListTitle,
+                    systemImage: "list.bullet"
+                ) {
+                    session.chooseFromFrequentList()
+                }
+                .slowWalkReadableContent()
             }
 
         case let .scanningMedicine(attempt):
-            if attempt.isAwaitingRecovery {
-                recoveryControls
-            } else {
-                readingIndicator
+            Section(attempt.isAwaitingRecovery ? "重新确认" : "识别状态") {
+                if attempt.isAwaitingRecovery {
+                    recoveryControls
+                } else {
+                    readingIndicator
+                }
             }
 
         case let .awaitingMedicineConfirmation(prompt):
-            confirmationControls(prompt)
+            Section("请选择药名") {
+                confirmationControls(prompt)
+            }
 
         case .awaitingMedicineAssessment:
-            EmptyView()
+            Section("识别与评估") {
+                Button(action: showCurrentMedicineAssessment) {
+                    Label(
+                        "继续查看识别与评估",
+                        systemImage: "doc.text.magnifyingglass"
+                    )
+                    .frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .frame(minHeight: SlowWalkLayout.minimumTapTarget)
+                .accessibilityHint("在当前用药陪伴页面继续查看。")
+
+                medicineCaptureSourceActions(startingSession: false)
+            }
 
         case .travelling:
-            primaryButton(CompanionCopy.approachStopTitle) {
-                session.approachStop()
+            Section {
+                primaryButton(
+                    CompanionCopy.approachStopTitle,
+                    systemImage: "bell"
+                ) {
+                    session.approachStop()
+                }
+                .slowWalkReadableContent()
             }
 
         case .approachingStop:
-            primaryButton(CompanionCopy.arriveSafelyTitle) {
-                session.arriveSafely()
+            Section {
+                primaryButton(
+                    CompanionCopy.arriveSafelyTitle,
+                    systemImage: "checkmark.circle"
+                ) {
+                    session.arriveSafely()
+                }
+                .slowWalkReadableContent()
             }
 
         case .completed:
-            completedControls
+            Section("本次陪伴") {
+                completedControls
+            }
         }
     }
 
     private var readingIndicator: some View {
-        HStack(spacing: 10) {
-            ProgressView()
-                .accessibilityHidden(true)
-            // Says "模拟识别", not "正在读取": nothing is being read.
-            Text("正在模拟识别，请稍等")
-                .font(.body)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("正在按演示脚本模拟识别药名，请稍等。本阶段不读取照片。")
+        ProgressView("正在模拟识别，请稍等")
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel(
+                "正在按演示脚本模拟识别药名，请稍等。本阶段不读取照片。"
+            )
+            .slowWalkReadableContent()
     }
 
     /// Recovery paths after a read that did not succeed.
     ///
     /// No medicine conclusion is offered here — only ways forward.
     private var recoveryControls: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(session.recoveryOptions) { option in
-                switch option {
-                case .retryPhoto:
-                    primaryButton(option.title) {
-                        session.retryMedicineRead()
-                    }
-                case .chooseFromList:
-                    secondaryButton(option.title) {
-                        session.chooseFromFrequentList()
-                    }
-                case .contactSomeone:
-                    VStack(alignment: .leading, spacing: 4) {
-                        secondaryButton(option.title) {
-                            // Contacting someone is a later stage; the button
-                            // is present so the recovery path is visible and
-                            // reviewable now.
-                        }
-                        .disabled(true)
-                        Text(CompanionCopy.contactSomeoneHint)
-                            .font(.footnote)
-                            .foregroundStyle(.secondary)
-                        // The "not wired up" line comes from the session's
-                        // capability table rather than being written here, so
-                        // it cannot drift from what the rest of the app says.
-                        if let detail = session.capabilities
-                            .detail(of: .trustedContacts)
-                        {
-                            Text(detail)
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                        }
-                    }
+        ForEach(session.recoveryOptions) { option in
+            switch option {
+            case .retryPhoto:
+                primaryButton(
+                    option.title,
+                    systemImage: "arrow.clockwise"
+                ) {
+                    session.retryMedicineRead()
                 }
+                .slowWalkReadableContent()
+            case .chooseFromList:
+                secondaryButton(
+                    option.title,
+                    systemImage: "list.bullet"
+                ) {
+                    session.chooseFromFrequentList()
+                }
+                .slowWalkReadableContent()
+            case .contactSomeone:
+                LabeledContent {
+                    Text(
+                        session.capabilities
+                            .status(of: .trustedContacts)
+                            .shortLabel
+                    )
+                    .foregroundStyle(.secondary)
+                } label: {
+                    Label(option.title, systemImage: "person.crop.circle")
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(
+                    session.capabilities
+                        .status(of: .trustedContacts)
+                        .summaryLine
+                )
+                .slowWalkReadableContent()
+
+                Text(CompanionCopy.contactSomeoneHint)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .slowWalkReadableContent()
             }
         }
     }
 
-    private func confirmationControls(_ prompt: MedicineConfirmationPrompt) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(prompt.candidates) { candidate in
-                Button {
-                    session.confirmMedicine(candidate)
-                    presentMedicineCapture()
-                } label: {
+    @ViewBuilder
+    private func confirmationControls(
+        _ prompt: MedicineConfirmationPrompt
+    ) -> some View {
+        ForEach(prompt.candidates) { candidate in
+            Button {
+                session.confirmMedicine(candidate)
+            } label: {
+                Label {
                     VStack(alignment: .leading, spacing: 4) {
                         Text(candidate.displayName)
-                            .font(.title3)
+                            .fontWeight(.semibold)
                         Text(candidate.recognitionHint)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding()
+                } icon: {
+                    Image(systemName: "pills")
+                        .accessibilityHidden(true)
                 }
-                .buttonStyle(.bordered)
-                .accessibilityLabel("选择 \(candidate.displayName)，\(candidate.recognitionHint)")
             }
-
-            Text("如果都对不上，可以重新试一次。")
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-
-            secondaryButton(CompanionCopy.retryPhotoTitle) {
-                session.retakeMedicinePhoto()
-            }
+            .buttonStyle(.plain)
+            .frame(minHeight: SlowWalkLayout.minimumTapTarget)
+            .contentShape(Rectangle())
+            .accessibilityLabel("选择 \(candidate.displayName)，\(candidate.recognitionHint)")
+            .accessibilityHint("确认后进入用药检查。")
+            .slowWalkReadableContent()
         }
+
+        Text("如果都对不上，可以重新试一次。")
+            .font(.footnote)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+            .slowWalkReadableContent()
+
+        secondaryButton(
+            CompanionCopy.retryPhotoTitle,
+            systemImage: "camera"
+        ) {
+            session.retakeMedicinePhoto()
+        }
+        .slowWalkReadableContent()
     }
 
+    @ViewBuilder
     private func canonicalCandidateControls(
         _ candidates: [SlowWalkDomain.MedicineCandidate]
     ) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            ForEach(candidates, id: \.medicine.id) { candidate in
-                Button {
-                    confirmCanonicalMedicine(candidate)
-                } label: {
-                    Text(candidate.medicine.canonicalName)
-                        .font(.body)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.vertical, 12)
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityLabel(
-                    "确认药名：\(candidate.medicine.canonicalName)"
+        ForEach(candidates, id: \.medicine.id) { candidate in
+            Button {
+                confirmCanonicalMedicine(candidate)
+            } label: {
+                Label(
+                    candidate.medicine.canonicalName,
+                    systemImage: "pills"
                 )
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .buttonStyle(.bordered)
+            .controlSize(.large)
+            .frame(minHeight: SlowWalkLayout.minimumTapTarget)
+            .accessibilityLabel(
+                "确认药名：\(candidate.medicine.canonicalName)"
+            )
+            .accessibilityHint("使用这个候选药名继续评估。")
         }
     }
 
@@ -552,45 +979,113 @@ struct CompanionView: View {
         }
     }
 
-    private func beginMedicineCapture(startingSession: Bool = false) {
-        guard MedicineCaptureEntryAction.perform(
-            on: session,
-            startingSession: startingSession
-        ) else { return }
-        presentMedicineCapture()
+    private func medicineCaptureSourceActions(
+        startingSession: Bool
+    ) -> some View {
+        MedicineCaptureSourceActions { imageData in
+            submitMedicineImage(
+                imageData,
+                startingSession: startingSession
+            )
+        }
+        .slowWalkReadableContent()
     }
 
-    private func presentMedicineCapture() {
-        guard case .awaitingMedicineAssessment = session.state,
-              let gateLease = session.currentAssessmentGateLease,
-              !medicineCapturePresentation.isPresented
+    private func submitMedicineImage(
+        _ imageData: Data,
+        startingSession: Bool
+    ) {
+        guard !imageData.isEmpty else { return }
+
+        if case .awaitingMedicineAssessment = session.state {
+            // The existing gate belongs to a candidate confirmation or retry.
+        } else {
+            guard MedicineCaptureEntryAction.perform(
+                on: session,
+                startingSession: startingSession
+            ) else { return }
+        }
+
+        guard let gateLease = session.currentAssessmentGateLease,
+              let context = captureContext(for: gateLease)
         else { return }
+
+        context.viewModel.capture(
+            imageData: imageData,
+            orientation: .up,
+            capturedAt: Date()
+        )
+        _ = medicineCapturePresentation.inputSubmissionStarted(
+            for: context.identity,
+            currentGateLease: session.currentAssessmentGateLease,
+            currentViewModelToken: medicineCaptureViewModelToken
+        )
+    }
+
+    private func captureContext(
+        for gateLease: MedicineAssessmentGateLease
+    ) -> (
+        identity: MedicineCapturePresentationIdentity,
+        viewModel: MedicineCaptureViewModel
+    )? {
+        if medicineCapturePresentation.isPresented,
+           let identity = medicineCapturePresentation.current,
+           identity.gateLease == gateLease,
+           identity.viewModelToken == medicineCaptureViewModelToken,
+           let medicineCaptureViewModel
+        {
+            medicineCaptureViewModel.reset()
+            return (identity, medicineCaptureViewModel)
+        }
+
+        if medicineCapturePresentation.isPresented {
+            medicineCapturePresentation.requestCurrentDismissal()
+            completeMedicineCaptureDismissal()
+        }
 
         let identity = MedicineCapturePresentationIdentity(
             token: UUID(),
             gateLease: gateLease,
             viewModelToken: UUID()
         )
-        let viewModel = environment.makeMedicineCaptureViewModel {
-            _ = medicineCapturePresentation.assessmentSubmissionAccepted(
-                for: identity,
-                currentGateLease: session.currentAssessmentGateLease,
-                currentViewModelToken: medicineCaptureViewModelToken
-            )
-        }
+        let viewModel = environment.makeMedicineCaptureViewModel()
         medicineCaptureViewModel = viewModel
         medicineCaptureViewModelToken = identity.viewModelToken
         medicineCapturePresentation.present(identity)
+        return (identity, viewModel)
     }
 
-    private var isMedicineCapturePresented: Binding<Bool> {
-        Binding(
-            get: { medicineCapturePresentation.isPresented },
-            set: { shouldPresent in
-                guard !shouldPresent else { return }
-                medicineCapturePresentation.requestCurrentDismissal()
-            }
+    private func showCurrentMedicineAssessment() {
+        guard let gateLease = session.currentAssessmentGateLease else {
+            return
+        }
+
+        if medicineCapturePresentation.isPresented,
+           let identity = medicineCapturePresentation.current,
+           identity.gateLease == gateLease,
+           identity.viewModelToken == medicineCaptureViewModelToken
+        {
+            _ = medicineCapturePresentation.inputSubmissionStarted(
+                for: identity,
+                currentGateLease: gateLease,
+                currentViewModelToken: medicineCaptureViewModelToken
+            )
+            return
+        }
+
+        guard let context = captureContext(for: gateLease) else { return }
+        _ = medicineCapturePresentation.inputSubmissionStarted(
+            for: context.identity,
+            currentGateLease: gateLease,
+            currentViewModelToken: medicineCaptureViewModelToken
         )
+    }
+
+    private func returnToMedicineCapture() {
+        guard let identity = medicineCapturePresentation.current,
+              medicineCapturePresentation.returnToCapture(for: identity)
+        else { return }
+        medicineCaptureViewModel?.reset()
     }
 
     private func completeMedicineCaptureDismissal() {
@@ -598,61 +1093,108 @@ struct CompanionView: View {
                 medicineCapturePresentation.completeNextDismissal(),
               medicineCaptureViewModelToken == dismissed.viewModelToken
         else { return }
+        let dismissedViewModel = medicineCaptureViewModel
         medicineCaptureViewModel = nil
         medicineCaptureViewModelToken = nil
+        Task { @MainActor in
+            await dismissedViewModel?.dismiss()
+        }
     }
 
     private var completedControls: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("这次陪伴的记录已经保存在本次运行中。")
-                .font(.body)
-            secondaryButton(CompanionCopy.startCompanionTitle) {
-                beginMedicineCapture(startingSession: true)
-            }
+        Group {
+            Label(
+                "这次陪伴的记录已经保存在本次运行中。",
+                systemImage: "checkmark.circle"
+            )
+            .fixedSize(horizontal: false, vertical: true)
+            .slowWalkReadableContent()
+
+            medicineCaptureSourceActions(startingSession: true)
         }
     }
 
     private var endEarlyButton: some View {
-        Button(CompanionCopy.endEarlyTitle) {
-            session.endEarly()
+        Button(role: .destructive) {
+            isEndEarlyConfirmationPresented = true
+        } label: {
+            Label(CompanionCopy.endEarlyTitle, systemImage: "xmark.circle")
         }
-        .font(.body)
-        // A bare text button is roughly text-height; pad it so the tap target
-        // clears 44pt at the default text size.
-        .padding(.vertical, 12)
-        .frame(minWidth: 44, minHeight: 44, alignment: .leading)
-        .accessibilityHint("结束这次陪伴，记录会保存下来。")
+        .frame(minHeight: SlowWalkLayout.minimumTapTarget)
+        .accessibilityHint("显示确认选项。")
     }
 
     // MARK: - Button helpers
 
     private func primaryButton(
         _ title: String,
+        systemImage: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Text(title)
-                .font(.title3)
-                .fontWeight(.semibold)
+            Label(title, systemImage: systemImage)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
         }
         .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        .frame(minHeight: SlowWalkLayout.minimumTapTarget)
         .accessibilityLabel(title)
     }
 
     private func secondaryButton(
         _ title: String,
+        systemImage: String,
         action: @escaping () -> Void
     ) -> some View {
         Button(action: action) {
-            Text(title)
-                .font(.body)
+            Label(title, systemImage: systemImage)
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 12)
         }
         .buttonStyle(.bordered)
+        .controlSize(.large)
+        .frame(minHeight: SlowWalkLayout.minimumTapTarget)
         .accessibilityLabel(title)
+    }
+
+    private func moveAccessibilityFocus(for state: CompanionFlowState) {
+        Task { @MainActor in
+            await Task.yield()
+            if case .awaitingMedicineAssessment = state {
+                accessibilityFocus = .assessment
+            } else {
+                accessibilityFocus = .step
+            }
+        }
+    }
+}
+
+/// Reads the live assessment gate inside the page's own observation scope, so
+/// a long-running assessment cannot leave stale content on screen.
+private struct MedicineAssessmentGateReader<
+    Content: View,
+    Unavailable: View
+>: View {
+    let session: CompanionSessionModel
+    private let content: (MedicineAssessmentGate) -> Content
+    private let unavailable: () -> Unavailable
+
+    init(
+        session: CompanionSessionModel,
+        @ViewBuilder content: @escaping (MedicineAssessmentGate) -> Content,
+        @ViewBuilder unavailable: @escaping () -> Unavailable
+    ) {
+        self.session = session
+        self.content = content
+        self.unavailable = unavailable
+    }
+
+    @ViewBuilder
+    var body: some View {
+        if let gate = session.assessmentGate {
+            content(gate)
+        } else {
+            unavailable()
+        }
     }
 }
 

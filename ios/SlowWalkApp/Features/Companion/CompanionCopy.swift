@@ -143,7 +143,7 @@ enum CompanionCopy {
     static func nextStep(for state: CompanionFlowState) -> String {
         switch state {
         case .notStarted:
-            "准备好以后，点击\u{201c}开始陪伴\u{201d}。"
+            "准备好以后，拍摄药品标签，或从相册选择药品图片。"
         case .preDepartureCheck:
             "请拍摄药品标签，也可以从常用药名里选择。"
         case let .scanningMedicine(attempt):
