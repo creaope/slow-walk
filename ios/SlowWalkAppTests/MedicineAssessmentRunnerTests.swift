@@ -1035,16 +1035,15 @@ struct MedicineAssessmentRunnerTests {
         try await verifyValidQueuedStart(rejectTransition: true)
     }
 
-    @Test func appEnvironmentProvidesProductionDemoHealthContext() {
+    @Test func appEnvironmentUsesBundledDemoHealthProfile() {
         let environment = AppEnvironment(
             clock: AppFixedClock(fixedDate: RunnerFixtures.date)
         )
 
         #expect(
-            environment.currentUserHealthProfile.id.uuidString
-                == "10000000-0000-0000-0000-000000000001"
+            environment.currentUserHealthProfile
+                == BundledDemoUserProfile.profile.healthProfile
         )
-        #expect(environment.currentUserHealthProfile.age == 72)
         #expect(environment.currentMedicationRecords.isEmpty)
     }
 
