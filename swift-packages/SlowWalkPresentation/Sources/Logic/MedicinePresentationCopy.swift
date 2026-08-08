@@ -27,6 +27,137 @@ public enum MedicinePresentationCopy {
     public static let demoDisclaimer =
         "DEMO DATA — NOT FOR CLINICAL USE"
 
+    /// The Chinese sentence shown to users for the canonical demo disclaimer.
+    ///
+    /// The raw canonical value (`demoDisclaimer`) stays English so the medicine
+    /// pipeline's oracle and pass-through rendering are unchanged; this constant
+    /// is the display-layer localization only.
+    public static let demoDisclaimerDisplayCopy =
+        "演示数据，仅用于功能展示，不用于临床用途"
+
+    /// Maps a raw demo disclaimer to the user-visible display string.
+    ///
+    /// Only the known canonical disclaimer (`demoDisclaimer`) is localized to
+    /// Chinese; any other disclaimer is returned **unchanged** so non-canonical
+    /// medical wording is never rewritten. `nil` maps to `nil`, which keeps the
+    /// "render only when present" contract intact for views that gate on it.
+    public static func displayDisclaimer(for raw: String?) -> String? {
+        guard let raw else { return nil }
+        return raw == demoDisclaimer ? demoDisclaimerDisplayCopy : raw
+    }
+
+    // MARK: - Display mapping for known demo canonical medicine names
+
+    /// Known demo canonical medicine names mapped to their Chinese display
+    /// forms. This is a display-only layer; canonical identity, equality,
+    /// resolver, risk engine, and pipeline semantics are never affected.
+    private static let medicineNameDisplayMap: [String: String] = [
+        "Acetaminophen": "对乙酰氨基酚",
+        "Unable to confirm the medicine": "无法确认药品身份",
+    ]
+
+    /// Maps a known demo canonical medicine name to its Chinese display name.
+    ///
+    /// Unknown names pass through unchanged so non-demo or model-generated
+    /// medical content is never rewritten. `nil` maps to `nil`.
+    public static func displayMedicineName(
+        _ canonicalName: String?
+    ) -> String? {
+        guard let canonicalName else { return nil }
+        return medicineNameDisplayMap[canonicalName] ?? canonicalName
+    }
+
+    // MARK: - Display mapping for known demo canonical primary instructions
+
+    /// Known demo canonical primary instructions mapped to Chinese.
+    private static let primaryInstructionDisplayMap: [String: String] = [
+        "Review the verified source information before use.":
+            "使用前请核对已验证的信息来源。",
+        "Pause and review the available information.":
+            "请暂停并查看现有信息。",
+        "Review the medication history with a healthcare professional.":
+            "请与医护人员核对用药记录。",
+        "Do not take this medicine until a healthcare professional confirms the next step.":
+            "在医护人员确认之前，请勿服用此药品。",
+        "Retake a clear photo of the front of the medicine box.":
+            "请重新拍摄药品包装盒正面清晰照片。",
+    ]
+
+    /// Maps a known demo canonical primary instruction to its Chinese display
+    /// text. Unknown instructions pass through unchanged; `nil` maps to `nil`.
+    public static func displayPrimaryInstruction(
+        _ instruction: String?
+    ) -> String? {
+        guard let instruction else { return nil }
+        return primaryInstructionDisplayMap[instruction] ?? instruction
+    }
+
+    // MARK: - Display mapping for source document titles
+
+    /// Maps the known demo canonical source document title to its Chinese
+    /// display form. Unknown titles pass through unchanged.
+    public static func displayDocumentTitle(_ title: String) -> String {
+        if title == demoDisclaimer {
+            return demoDisclaimerDisplayCopy
+        }
+        return title
+    }
+
+    /// Renders a `SourceReference` for display with Chinese document title
+    /// mapping applied.
+    ///
+    /// When both fields match the known deterministic demo source exactly, the
+    /// entire summary is replaced with the canonical Chinese display form so
+    /// the user never sees the English catalog identifiers.  Any other
+    /// combination falls through to the general `sourceName — documentTitle`
+    /// rendering with `displayDocumentTitle` applied to the title portion.
+    public static func displaySourceSummary(
+        _ reference: SourceReference
+    ) -> String {
+        if reference.sourceName == "SlowWalk Synthetic Demo Catalog",
+           reference.documentTitle == demoDisclaimer
+        {
+            return "SlowWalk 演示药品目录 — \(demoDisclaimerDisplayCopy)"
+        }
+        return "\(reference.sourceName) — \(displayDocumentTitle(reference.documentTitle))"
+    }
+
+    // MARK: - Display mapping for known demo canonical warnings
+
+    /// Known demo canonical warning strings mapped to Chinese.
+    private static let warningDisplayMap: [String: String] = [
+        "Do not take this medicine until its identity is confirmed.":
+            "药品身份确认前请勿服用。",
+        "A risk assessment is not available for the resolved medicine.":
+            "未能获取已识别药品的风险评估结果。",
+        "More than one medicine matched the recognized text.":
+            "识别文字匹配到多个可能的药品。",
+        "The available recognition evidence is insufficient.":
+            "当前识别证据不足以确认药品。",
+        "No medicine in the verified data matched the recognized text.":
+            "已验证数据中未找到与识别文字匹配的药品。",
+        "The medicine text could not be recognized reliably.":
+            "未能可靠识别药品标签文字。",
+    ]
+
+    /// Maps a known demo canonical warning to its Chinese display text.
+    /// Unknown warnings pass through unchanged; `nil` maps to `nil`.
+    ///
+    /// The known demo disclaimer is also checked so that canonical
+    /// `Medicine.warnings` entries containing `"DEMO DATA — NOT FOR CLINICAL
+    /// USE"` are mapped to the same Chinese sentence without duplicating the
+    /// disclaimer copy.
+    public static func displayWarning(_ warning: String?) -> String? {
+        guard let warning else { return nil }
+        if let mapped = warningDisplayMap[warning] {
+            return mapped
+        }
+        if warning == demoDisclaimer {
+            return demoDisclaimerDisplayCopy
+        }
+        return warning
+    }
+
     // MARK: - Section headings
 
     public static let recognitionHeading = "图片识别"
@@ -37,26 +168,26 @@ public enum MedicinePresentationCopy {
         "在线识别暂不可用，已改用设备内识别。"
     public static let onDeviceOnlyRecognitionNotice =
         "本次仅在设备上识别。"
-    public static let riskLevelHeading = "Risk level"
+    public static let riskLevelHeading = "风险等级"
     public static let primaryInstructionHeading =
-        "What to do next"
-    public static let warningsHeading = "Warnings"
+        "接下来怎么做"
+    public static let warningsHeading = "注意事项"
     public static let recommendedActionsHeading =
-        "Recommended actions"
+        "建议措施"
     public static let sourceReferencesHeading =
-        "Information sources"
+        "信息来源"
     public static let confirmationRequiredHeading =
-        "Medicine identity not confirmed"
+        "药品身份未确认"
 
     /// Shown independently of the confirmation-requirement indicator when
     /// the canonical card's `mustConfirmMedicine` is `true`.
     public static let mustConfirmLabel =
-        "Please confirm the medicine information"
+        "请确认药品信息"
 
     /// Shown when the canonical card has no source references at all, so the
     /// absence is visible instead of silently rendering an empty section.
     public static let noSourceReferencesText =
-        "No information source was recorded for this result."
+        "本结果未记录信息来源。"
 
     /// Describes identity certainty without changing the canonical medicine.
     public static func medicineNameLabel(
@@ -90,11 +221,11 @@ public enum MedicinePresentationCopy {
     public static let idleText =
         "尚未开始药品评估。"
     public static let recognizingText =
-        "Reading the medicine label."
+        "正在识别药品标签。"
     public static let assessingText =
-        "Checking the medicine information."
+        "正在核对药品信息。"
     public static let cancelledText =
-        "The medicine assessment was cancelled."
+        "药品评估已取消。"
 
     // MARK: - Risk level
 
@@ -105,13 +236,13 @@ public enum MedicinePresentationCopy {
     ) -> String {
         switch level {
         case .green:
-            return "Green"
+            return "绿色"
         case .yellow:
-            return "Yellow"
+            return "黄色"
         case .orange:
-            return "Orange"
+            return "橙色"
         case .red:
-            return "Red"
+            return "红色"
         }
     }
 
@@ -122,13 +253,13 @@ public enum MedicinePresentationCopy {
     ) -> String {
         switch attention {
         case .routine:
-            return "Routine attention"
+            return "日常注意"
         case .reviewRequired:
-            return "Review required"
+            return "需要复核"
         case .urgentAttention:
-            return "Urgent attention"
+            return "紧急关注"
         case .immediateAttention:
-            return "Immediate attention"
+            return "立即关注"
         }
     }
 
@@ -194,23 +325,23 @@ public enum MedicinePresentationCopy {
     ) -> String {
         switch action {
         case .followVerifiedSourceInformation:
-            return "Follow the verified source information"
+            return "依照已核实的信息来源"
         case .consultHealthcareProfessional:
-            return "Consult a healthcare professional"
+            return "咨询医护人员"
         case .notifyFamilyMember:
-            return "Notify a family member"
+            return "通知家人"
         case .reviewMedicineSources:
-            return "Review the medicine sources"
+            return "查看药品信息来源"
         case .updateHealthProfile:
-            return "Update the health profile"
+            return "更新健康资料"
         case .retakeMedicinePhoto:
-            return "Retake the medicine photo"
+            return "重新拍摄药品照片"
         case .doNotTakeUntilMedicineConfirmed:
-            return "Do not take until the medicine is confirmed"
+            return "确认药品前请勿服用"
         case .reviewMedicationHistory:
-            return "Review the medication history"
+            return "查看用药记录"
         case .remeasureBodyMetrics:
-            return "Measure body metrics again"
+            return "重新测量身体指标"
         }
     }
 
@@ -223,31 +354,31 @@ public enum MedicinePresentationCopy {
     ) -> String {
         switch kind {
         case .api:
-            return "The service could not complete the request."
+            return "服务无法完成请求。"
         case .timeout:
-            return "The request timed out before a result arrived."
+            return "请求超时，未收到结果。"
         case .malformedResponse:
-            return "The response could not be read."
+            return "返回内容无法读取。"
         case .transportUnavailable:
-            return "The service could not be reached."
+            return "无法连接服务。"
         case .recognition:
-            return "The medicine label could not be read."
+            return "无法识别药品标签。"
         case .unknown:
-            return "The request did not complete."
+            return "请求未能完成。"
         }
     }
 
     /// No risk level, instruction, or action card is implied for a failure.
     public static let noResultAvailableText =
-        "No medicine result was received."
+        "未收到药品评估结果。"
 
-    public static let retryButtonTitle = "Try again"
+    public static let retryButtonTitle = "重试"
     public static let retryAccessibilityHint =
-        "Requests the medicine assessment again."
+        "重新发起药品评估。"
     public static let confirmMedicineButtonTitle =
-        "Confirm the medicine"
+        "确认药品"
     public static let confirmMedicineAccessibilityHint =
-        "Opens medicine confirmation."
+        "打开药品确认。"
 
     // MARK: - Source references
 
@@ -262,6 +393,6 @@ public enum MedicinePresentationCopy {
     public static func sourceVersionSummary(
         _ reference: SourceReference
     ) -> String {
-        "Version \(reference.versionOrDate)"
+        "版本 \(reference.versionOrDate)"
     }
 }

@@ -38,14 +38,20 @@ public struct MedicineActionCardView: View {
 
     public var body: some View {
         Group {
-            if let disclaimer = demoDisclaimer {
+            if let disclaimer = MedicinePresentationCopy.displayDisclaimer(
+                for: demoDisclaimer
+            ) {
                 Section {
                     MedicineDemoDisclaimerRow(text: disclaimer)
                 }
             }
 
             Section {
-                Text(actionCard.title)
+                Text(
+                    MedicinePresentationCopy
+                        .displayMedicineName(actionCard.title)
+                        ?? actionCard.title
+                )
                     .font(.title3)
                     .fontWeight(.semibold)
                     .fixedSize(horizontal: false, vertical: true)
@@ -104,7 +110,12 @@ public struct MedicineActionCardView: View {
 
     private var primaryInstructionRow: some View {
         Label {
-            Text(actionCard.primaryInstruction)
+            Text(
+                MedicinePresentationCopy
+                    .displayPrimaryInstruction(
+                        actionCard.primaryInstruction
+                    ) ?? actionCard.primaryInstruction
+            )
                 .font(.headline)
                 .fixedSize(horizontal: false, vertical: true)
         } icon: {
@@ -115,7 +126,7 @@ public struct MedicineActionCardView: View {
         .accessibilityLabel(
             """
             \(MedicinePresentationCopy.primaryInstructionHeading): \
-            \(actionCard.primaryInstruction)
+            \(MedicinePresentationCopy.displayPrimaryInstruction(actionCard.primaryInstruction) ?? actionCard.primaryInstruction)
             """
         )
     }
@@ -131,7 +142,11 @@ public struct MedicineActionCardView: View {
                 id: \.offset
             ) { _, warning in
                 Label {
-                    Text(warning)
+                    Text(
+                        MedicinePresentationCopy
+                            .displayWarning(warning)
+                            ?? warning
+                    )
                         .fixedSize(horizontal: false, vertical: true)
                 } icon: {
                     Image(systemName: "exclamationmark.triangle")
@@ -195,7 +210,7 @@ public struct MedicineActionCardView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(
                             MedicinePresentationCopy
-                                .sourceSummary(reference)
+                                .displaySourceSummary(reference)
                         )
                         .fixedSize(
                             horizontal: false,

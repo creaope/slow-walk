@@ -61,7 +61,9 @@ public struct MedicineAssessmentView: View {
 
     @ViewBuilder
     private var demoDisclaimerSection: some View {
-        if let disclaimer = state.demoDisclaimer {
+        if let disclaimer = MedicinePresentationCopy.displayDisclaimer(
+            for: state.demoDisclaimer
+        ) {
             Section {
                 MedicineDemoDisclaimerRow(text: disclaimer)
             }
@@ -107,7 +109,11 @@ public struct MedicineAssessmentView: View {
                             .font(.caption)
                             .foregroundStyle(.secondary)
 
-                            Text(medicineName)
+                            Text(
+                                MedicinePresentationCopy
+                                    .displayMedicineName(medicineName)
+                                    ?? medicineName
+                            )
                                 .fontWeight(.semibold)
                                 .fixedSize(horizontal: false, vertical: true)
                         }

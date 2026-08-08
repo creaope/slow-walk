@@ -11,13 +11,17 @@ struct SafetyInformationView: View {
                     .slowWalkReadableContent()
             }
 
-            Section("当前能力状态") {
-                ForEach(environment.capabilities.allStatuses) { status in
+            Section("本次可体验能力") {
+                ForEach(
+                    environment.capabilities.allStatuses.filter {
+                        $0.availability != .unavailable
+                    }
+                ) { status in
                     capabilityRow(status)
                         .slowWalkReadableContent()
                 }
 
-                Text("能力状态只说明当前实现方式，不说明用药是否安全。")
+                Text("本页展示当前可以体验的功能及运行方式。")
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
