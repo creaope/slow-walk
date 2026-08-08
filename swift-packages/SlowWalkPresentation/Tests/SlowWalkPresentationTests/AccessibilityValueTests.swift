@@ -310,12 +310,22 @@ final class AccessibilityValueTests: XCTestCase {
         let canonicalContent = try XCTUnwrap(
             body.range(of: "content")
         )
+        let recognitionNotice = try XCTUnwrap(
+            body.range(of: "recognitionNoticeSection")
+        )
         let recognition = try XCTUnwrap(
             body.range(of: "recognitionSection")
         )
 
         XCTAssertLessThan(disclaimer.lowerBound, canonicalContent.lowerBound)
-        XCTAssertLessThan(canonicalContent.lowerBound, recognition.lowerBound)
+        XCTAssertLessThan(
+            canonicalContent.lowerBound,
+            recognitionNotice.lowerBound
+        )
+        XCTAssertLessThan(
+            recognitionNotice.lowerBound,
+            recognition.lowerBound
+        )
     }
 
     func test_assessmentView_hasOneTopLevelDisclaimerRow() throws {

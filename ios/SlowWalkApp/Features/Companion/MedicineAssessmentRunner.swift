@@ -12,6 +12,7 @@ final class MedicineAssessmentRunner {
         fileprivate let imageInput: OCRImageInput
         fileprivate let userProfile: UserHealthProfile
         fileprivate let recentRecords: [MedicationRecord]
+        fileprivate let recognitionMode: MedicineRecognitionMode
     }
 
     struct ConfirmationInvocation {
@@ -100,6 +101,24 @@ final class MedicineAssessmentRunner {
         )
     }
 
+    convenience init(
+        session: CompanionSessionModel,
+        recognitionRouter: any MedicineRecognitionRouting,
+        requester: any MedicineAssessmentRequesting,
+        confirmer: (any MedicineCandidateConfirming)? = nil,
+        clock: any SlowWalkDomain.Clock
+    ) {
+        self.init(
+            session: session,
+            coordinator: MedicineAssessmentCoordinator(
+                recognitionRouter: recognitionRouter,
+                requester: requester,
+                confirmer: confirmer,
+                clock: clock
+            )
+        )
+    }
+
     init(
         session: CompanionSessionModel,
         coordinator: MedicineAssessmentCoordinator
@@ -123,7 +142,8 @@ final class MedicineAssessmentRunner {
     func makeAssessmentInvocation(
         imageInput: OCRImageInput,
         userProfile: UserHealthProfile,
-        recentRecords: [MedicationRecord] = []
+        recentRecords: [MedicationRecord] = [],
+        mode: MedicineRecognitionMode = .onDeviceOnly
     ) -> AssessmentInvocation? {
         guard let gateLease = session.currentAssessmentGateLease,
               isCurrentAssessmentGate(gateLease)
@@ -132,7 +152,8 @@ final class MedicineAssessmentRunner {
             gateLease: gateLease,
             imageInput: imageInput,
             userProfile: userProfile,
-            recentRecords: recentRecords
+            recentRecords: recentRecords,
+            recognitionMode: mode
         )
     }
 
@@ -212,7 +233,8 @@ final class MedicineAssessmentRunner {
                 imageInput: invocation.imageInput,
                 userProfile: invocation.userProfile,
                 recentRecords: invocation.recentRecords,
-                requestID: context.requestID
+                requestID: context.requestID,
+                mode: invocation.recognitionMode
             )
         }
         lifecycleTail = task
@@ -434,7 +456,7 @@ final class MedicineAssessmentRunner {
             requirement.response?.requestID == nil
                 || requirement.response?.requestID == requestID
         case .failed(let failure):
-            failure.requestID == requestID
+            failure.requestID == nil || failure.requestID == requestID
         case .idle, .recognizing, .assessing, .cancelled:
             true
         }

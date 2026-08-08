@@ -16,6 +16,8 @@ public enum APIErrorCode:
     case unsupportedMediaType = "UNSUPPORTED_MEDIA_TYPE"
     case unsupportedAPIVersion = "UNSUPPORTED_API_VERSION"
     case validationError = "VALIDATION_ERROR"
+    case requestBodyTooLarge = "REQUEST_BODY_TOO_LARGE"
+    case imageTooLarge = "IMAGE_TOO_LARGE"
     case internalError = "INTERNAL_ERROR"
     case invalidUserProfile = "INVALID_USER_PROFILE"
     case unsupportedProfileSchema = "UNSUPPORTED_PROFILE_SCHEMA"
@@ -32,6 +34,10 @@ public enum APIErrorCode:
     case medicineAmbiguous = "MEDICINE_AMBIGUOUS"
     case medicineRecognitionFailed = "MEDICINE_RECOGNITION_FAILED"
     case medicineInsufficientEvidence = "MEDICINE_INSUFFICIENT_EVIDENCE"
+    case providerRateLimited = "PROVIDER_RATE_LIMITED"
+    case providerUnavailable = "PROVIDER_UNAVAILABLE"
+    case providerTimeout = "PROVIDER_TIMEOUT"
+    case invalidProviderResponse = "INVALID_PROVIDER_RESPONSE"
     case invalidLocationSample = "INVALID_LOCATION_SAMPLE"
     case locationDataStale = "LOCATION_DATA_STALE"
     case locationAccuracyInsufficient = "LOCATION_ACCURACY_INSUFFICIENT"
@@ -54,6 +60,10 @@ public enum APIErrorCode:
             self = .unsupportedAPIVersion
         case "validation_error", "validation_failed":
             self = .validationError
+        case "request_body_too_large":
+            self = .requestBodyTooLarge
+        case "image_too_large":
+            self = .imageTooLarge
         case "internal_error":
             self = .internalError
         case "medicine_ambiguous":
@@ -64,6 +74,14 @@ public enum APIErrorCode:
             self = .medicineRecognitionFailed
         case "medicine_insufficient_evidence":
             self = .medicineInsufficientEvidence
+        case "provider_rate_limited":
+            self = .providerRateLimited
+        case "provider_unavailable":
+            self = .providerUnavailable
+        case "provider_timeout":
+            self = .providerTimeout
+        case "invalid_provider_response":
+            self = .invalidProviderResponse
         default:
             throw DecodingError.dataCorruptedError(
                 in: container,

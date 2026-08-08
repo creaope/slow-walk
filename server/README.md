@@ -32,6 +32,16 @@ swift test
   - 接收模拟 OCR 的 `MedicineRecognitionInput`
   - 只解析服务端 SwiftPM resource 中的演示目录
   - 歧义、未找到和证据不足使用稳定的 `APIErrorDTO` 错误码
+- `POST /api/v1/medicine/recognize`
+  - 接收一个 Base64 编码的 `image/jpeg`、`image/png` 或 `image/webp`
+  - JSON 请求体上限为 6 MiB，解码后的单图上限为 4 MiB
+  - 智谱只提取受限包装证据；canonical identity 仍由现有受控目录和
+    `MedicineResolver` 决定，不执行风险判断
+  - 无凭据、429、Provider 5xx、网络失败和超时返回稳定的
+    `provider_unavailable` 结果，并允许客户端使用本地 fallback
+  - 上游响应正文、图片、凭据和 Authorization 不进入响应或日志
+  - `requestID` 只用于关联请求和日志；当前端点不提供幂等缓存或重放语义，
+    相同 ID 的两次提交会分别执行识别
 - `POST /api/v1/medicine/assess`
   - 完成归一化、候选解析、当前档案/历史风险重评估和 `ActionCard` 生成
   - canonical request 使用严格 `UserHealthProfileDTO`；Server 显式映射 Domain
@@ -60,3 +70,7 @@ swift test
 Hummingbird 为每个传输请求写入 `hb.request.id` 日志元数据；API DTO
 中的 UUID 请求 ID 会作为 `slowwalk.api_request_id` 进入结构化日志。
 日志不会记录药品、健康档案或请求正文。
+
+未配置 `ZHIPU_API_KEY` 时服务仍可启动，药品识别端点返回可恢复的 Provider
+不可用结果。只有运行环境成功加载凭据和合法 Provider 配置时才创建 live
+Vision client；其他 API 不依赖该凭据。

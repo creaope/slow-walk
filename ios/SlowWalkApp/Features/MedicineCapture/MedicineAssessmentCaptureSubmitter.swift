@@ -4,22 +4,29 @@ import SlowWalkDomain
 
 typealias UserHealthProfileProvider = @MainActor () -> UserHealthProfile
 typealias MedicationRecordsProvider = @MainActor () -> [MedicationRecord]
+typealias MedicineRecognitionModeProvider =
+    @MainActor () -> MedicineRecognitionMode
 
 @MainActor
 final class MedicineAssessmentCaptureSubmitter: MedicineCaptureProcessing {
     private let runner: MedicineAssessmentRunner
     private let userHealthProfileProvider: UserHealthProfileProvider
     private let medicationRecordsProvider: MedicationRecordsProvider
+    private let recognitionModeProvider: MedicineRecognitionModeProvider
     private var activeOperationID: UUID?
 
     init(
         runner: MedicineAssessmentRunner,
         userHealthProfileProvider: @escaping UserHealthProfileProvider,
-        medicationRecordsProvider: @escaping MedicationRecordsProvider
+        medicationRecordsProvider: @escaping MedicationRecordsProvider,
+        recognitionModeProvider: @escaping MedicineRecognitionModeProvider = {
+            .onDeviceOnly
+        }
     ) {
         self.runner = runner
         self.userHealthProfileProvider = userHealthProfileProvider
         self.medicationRecordsProvider = medicationRecordsProvider
+        self.recognitionModeProvider = recognitionModeProvider
     }
 
     func process(
@@ -39,10 +46,12 @@ final class MedicineAssessmentCaptureSubmitter: MedicineCaptureProcessing {
         return try await withTaskCancellationHandler {
             do {
                 try Task.checkCancellation()
+                let recognitionMode = recognitionModeProvider()
                 let invocation = runner.makeAssessmentInvocation(
                     imageInput: input,
                     userProfile: userHealthProfileProvider(),
-                    recentRecords: medicationRecordsProvider()
+                    recentRecords: medicationRecordsProvider(),
+                    mode: recognitionMode
                 )
                 guard let invocation else {
                     throw MedicineCaptureProcessingFailure

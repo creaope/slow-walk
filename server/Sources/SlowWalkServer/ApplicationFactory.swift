@@ -1,4 +1,5 @@
 import Hummingbird
+import Logging
 import SlowWalkAPIContracts
 import SlowWalkDataInterfaces
 import SlowWalkLocationRisk
@@ -20,6 +21,48 @@ public func makeSlowWalkApplication(
         (any LocationRiskAssessing)? = nil,
     locationRiskConfiguration:
         LocationRiskConfiguration = .demo
+) throws -> some ApplicationProtocol {
+    let evidenceExtractor: any MedicinePackageEvidenceExtracting
+    do {
+        evidenceExtractor = try ZhipuVisionClient()
+    } catch ZhipuVisionClientError.missingCredential {
+        // Recognition remains available as an explicit provider-unavailable
+        // response when runtime credentials are intentionally absent.
+        evidenceExtractor = UnavailableMedicinePackageEvidenceExtractor()
+    }
+    return try makeSlowWalkApplication(
+        configuration: configuration,
+        riskEngine: riskEngine,
+        dateProvider: dateProvider,
+        uuidProvider: uuidProvider,
+        medicineCatalogLoader: medicineCatalogLoader,
+        medicineCache: medicineCache,
+        medicineKnowledgeSearcher: medicineKnowledgeSearcher,
+        locationRiskAssessor: locationRiskAssessor,
+        locationRiskConfiguration: locationRiskConfiguration,
+        medicinePackageEvidenceExtractor: evidenceExtractor
+    )
+}
+
+func makeSlowWalkApplication(
+    configuration: SlowWalkServerConfiguration = .init(),
+    riskEngine: any RiskAssessing = MedicationRiskEngine(),
+    dateProvider: any DateProviding = SystemDateProvider(),
+    uuidProvider: any UUIDProviding = SystemUUIDProvider(),
+    medicineCatalogLoader: any MedicineCatalogLoading =
+        BundledDemoMedicineCatalogLoader(),
+    medicineCache: any MedicineCache = InMemoryMedicineCache(),
+    medicineKnowledgeSearcher:
+        (any MedicineKnowledgeSearching)? = nil,
+    locationRiskAssessor:
+        (any LocationRiskAssessing)? = nil,
+    locationRiskConfiguration:
+        LocationRiskConfiguration = .demo,
+    medicinePackageEvidenceExtractor:
+        any MedicinePackageEvidenceExtracting,
+    medicineRecognitionTimeout:
+        Duration = RemoteMedicineRecognitionService.defaultTimeout,
+    logger: Logger? = nil
 ) throws -> some ApplicationProtocol {
     // Validate the bundled catalog at composition time. A missing or unsafe
     // resource prevents startup instead of silently serving an empty catalog.
@@ -54,7 +97,9 @@ public func makeSlowWalkApplication(
     }
 
     let router = Router(context: SlowWalkRequestContext.self)
-    router.middlewares.add(LogRequestsMiddleware(.info))
+    router.middlewares.add(
+        PathOnlyRequestLoggingMiddleware<SlowWalkRequestContext>(.info)
+    )
 
     router.get("/health") { _, _ in
         HealthResponseDTO()
@@ -106,6 +151,30 @@ public func makeSlowWalkApplication(
         )
     }
 
+    let medicineRecognitionService = RemoteMedicineRecognitionService(
+        extractor: medicinePackageEvidenceExtractor,
+        resolver: try RemoteMedicineCandidateResolver(
+            catalog: medicineCatalog
+        ),
+        timeout: medicineRecognitionTimeout
+    )
+    let medicineRecognitionController =
+        RemoteMedicineRecognitionController(
+            service: medicineRecognitionService,
+            dateProvider: dateProvider,
+            uuidProvider: uuidProvider
+        )
+    router.post(
+        RouterPath(SlowWalkAPI.Endpoint.medicineRecognize.path)
+    ) {
+        request,
+        context in
+        try await medicineRecognitionController.handle(
+            request: request,
+            context: context
+        )
+    }
+
     let configuredLocationRiskAssessor:
         any LocationRiskAssessing =
         locationRiskAssessor
@@ -137,12 +206,19 @@ public func makeSlowWalkApplication(
         configuration: .init(
             address: .hostname(configuration.host, port: configuration.port),
             serverName: configuration.serverName
-        )
+        ),
+        logger: logger
+    )
+}
+
+public func runSlowWalkServer() async throws {
+    try await runSlowWalkServer(
+        configuration: SlowWalkServerConfiguration.load()
     )
 }
 
 public func runSlowWalkServer(
-    configuration: SlowWalkServerConfiguration = .init()
+    configuration: SlowWalkServerConfiguration
 ) async throws {
     let application = try makeSlowWalkApplication(
         configuration: configuration

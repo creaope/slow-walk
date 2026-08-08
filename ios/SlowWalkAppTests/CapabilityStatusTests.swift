@@ -5,7 +5,7 @@ import SlowWalkClientCore
 /// Tests for the capability status model.
 ///
 /// The point of these is not that the table parses — it is that each entry
-/// matches what the app can really do, and that the four availability values
+/// matches what the app can really do, and that the availability values
 /// can never be confused for one another on screen. A capability marked
 /// available with nothing behind it is exactly the defect this model exists to
 /// prevent, so the tests check the claims against the production types that
@@ -144,7 +144,7 @@ struct CapabilityStatusTests {
         }
     }
 
-    // MARK: - 9. The four availability values cannot be confused
+    // MARK: - 9. Availability values cannot be confused
 
     /// Every availability has a distinct label.
     ///
@@ -173,7 +173,7 @@ struct CapabilityStatusTests {
         }
     }
 
-    /// The four values answer "is this real" correctly.
+    /// The values answer "is this real" correctly.
     ///
     /// `.simulated` is the trap: it is implemented, so a check for "does
     /// anything happen" says yes, but it does not work on real input, so any
@@ -185,11 +185,53 @@ struct CapabilityStatusTests {
         #expect(CapabilityAvailability.deviceLocal.isImplemented)
         #expect(CapabilityAvailability.deviceLocal.isRealImplementation)
 
+        #expect(
+            CapabilityAvailability.onlineWithLocalFallback.isImplemented
+        )
+        #expect(
+            CapabilityAvailability.onlineWithLocalFallback
+                .isRealImplementation
+        )
+
         #expect(CapabilityAvailability.online.isImplemented)
         #expect(CapabilityAvailability.online.isRealImplementation)
 
         #expect(CapabilityAvailability.unavailable.isImplemented == false)
         #expect(CapabilityAvailability.unavailable.isRealImplementation == false)
+    }
+
+    @Test func medicineMainlineCatalogTracksOptionalOnlineConfiguration() {
+        let local = CapabilityCatalog.medicineRecognitionMainline(
+            onlineRecognitionConfigured: false
+        )
+        #expect(local.availability(of: .medicineRecognition) == .deviceLocal)
+        #expect(local.availability(of: .medicineRiskAssessment) == .deviceLocal)
+        #expect(local.availability(of: .visionOCR) == .deviceLocal)
+        #expect(local.availability(of: .serverDependency) == .unavailable)
+
+        let online = CapabilityCatalog.medicineRecognitionMainline(
+            onlineRecognitionConfigured: true
+        )
+        #expect(
+            online.availability(of: .medicineRecognition)
+                == .onlineWithLocalFallback
+        )
+        #expect(
+            online.availability(of: .serverDependency)
+                == .onlineWithLocalFallback
+        )
+        #expect(
+            online.detail(of: .serverDependency)?
+                .contains("设备内识别不依赖服务端") == true
+        )
+        #expect(
+            online.status(of: .medicineRecognition).shortLabel
+                == "可联网，可离线"
+        )
+        #expect(
+            online.detail(of: .medicineRecognition)?
+                .contains("可在设置中选择仅在设备上识别") == true
+        )
     }
 
     /// A displayed status line carries both the name and the real state.

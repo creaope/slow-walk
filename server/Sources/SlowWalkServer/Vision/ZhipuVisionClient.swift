@@ -80,6 +80,221 @@ struct VisionVisibleTextResult: Decodable, Sendable, Equatable {
     }
 }
 
+/// Strict visual evidence and catalog-search clues extracted from medicine
+/// packaging. Nothing in this contract can carry canonical identity or a
+/// clinical conclusion.
+struct RemoteMedicinePackageEvidence: Codable, Sendable, Equatable {
+    static let maximumVisibleTextCount = 64
+    static let maximumNamedEvidenceCount = 16
+    static let maximumPackagingFeatureCount = 24
+    static let maximumSearchQueryCount = 8
+    static let maximumVisibleTextLength = 256
+    static let maximumEvidenceTextLength = 160
+    static let maximumPackagingFeatureLength = 256
+    static let maximumSearchQueryLength = 96
+    static let maximumTotalSearchQueryCharacterCount = 384
+    static let maximumTotalCharacterCount = 4_096
+
+    let visibleTexts: [String]
+    let probableProductNames: [String]
+    let probableGenericNames: [String]
+    let manufacturerNames: [String]
+    let approvalIdentifiers: [String]
+    let dosageFormTexts: [String]
+    let packagingFeatures: [String]
+    let searchQueries: [String]
+    let imageReadable: Bool
+    let uncertainRegionsPresent: Bool
+
+    private enum CodingKeys: String, CodingKey, CaseIterable {
+        case visibleTexts
+        case probableProductNames
+        case probableGenericNames
+        case manufacturerNames
+        case approvalIdentifiers
+        case dosageFormTexts
+        case packagingFeatures
+        case searchQueries
+        case imageReadable
+        case uncertainRegionsPresent
+    }
+
+    init(
+        visibleTexts: [String],
+        probableProductNames: [String],
+        probableGenericNames: [String],
+        manufacturerNames: [String],
+        approvalIdentifiers: [String],
+        dosageFormTexts: [String],
+        packagingFeatures: [String],
+        searchQueries: [String],
+        imageReadable: Bool,
+        uncertainRegionsPresent: Bool
+    ) throws {
+        try Self.validate(
+            visibleTexts: visibleTexts,
+            probableProductNames: probableProductNames,
+            probableGenericNames: probableGenericNames,
+            manufacturerNames: manufacturerNames,
+            approvalIdentifiers: approvalIdentifiers,
+            dosageFormTexts: dosageFormTexts,
+            packagingFeatures: packagingFeatures,
+            searchQueries: searchQueries
+        )
+        self.visibleTexts = visibleTexts
+        self.probableProductNames = probableProductNames
+        self.probableGenericNames = probableGenericNames
+        self.manufacturerNames = manufacturerNames
+        self.approvalIdentifiers = approvalIdentifiers
+        self.dosageFormTexts = dosageFormTexts
+        self.packagingFeatures = packagingFeatures
+        self.searchQueries = searchQueries
+        self.imageReadable = imageReadable
+        self.uncertainRegionsPresent = uncertainRegionsPresent
+    }
+
+    init(from decoder: any Decoder) throws {
+        let rawContainer = try decoder.container(keyedBy: ArbitraryCodingKey.self)
+        let actualKeys = Set(rawContainer.allKeys.map(\.stringValue))
+        let expectedKeys = Set(CodingKeys.allCases.map(\.rawValue))
+        guard actualKeys == expectedKeys else {
+            throw Self.decodingError(decoder, "Unexpected model payload fields.")
+        }
+
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        do {
+            try self.init(
+                visibleTexts: container.decode([String].self, forKey: .visibleTexts),
+                probableProductNames: container.decode(
+                    [String].self, forKey: .probableProductNames
+                ),
+                probableGenericNames: container.decode(
+                    [String].self, forKey: .probableGenericNames
+                ),
+                manufacturerNames: container.decode(
+                    [String].self, forKey: .manufacturerNames
+                ),
+                approvalIdentifiers: container.decode(
+                    [String].self, forKey: .approvalIdentifiers
+                ),
+                dosageFormTexts: container.decode(
+                    [String].self, forKey: .dosageFormTexts
+                ),
+                packagingFeatures: container.decode(
+                    [String].self, forKey: .packagingFeatures
+                ),
+                searchQueries: container.decode(
+                    [String].self, forKey: .searchQueries
+                ),
+                imageReadable: container.decode(Bool.self, forKey: .imageReadable),
+                uncertainRegionsPresent: container.decode(
+                    Bool.self, forKey: .uncertainRegionsPresent
+                )
+            )
+        } catch is ValidationFailure {
+            throw Self.decodingError(decoder, "Model payload limits were exceeded.")
+        }
+    }
+
+    private struct TextCollection {
+        let values: [String]
+        let maximumCount: Int
+        let maximumLength: Int
+    }
+
+    private enum ValidationFailure: Error { case invalidTextCollection }
+
+    private static func validate(
+        visibleTexts: [String],
+        probableProductNames: [String],
+        probableGenericNames: [String],
+        manufacturerNames: [String],
+        approvalIdentifiers: [String],
+        dosageFormTexts: [String],
+        packagingFeatures: [String],
+        searchQueries: [String]
+    ) throws {
+        let totalSearchQueryCharacterCount = searchQueries.reduce(0) {
+            $0 + $1.count
+        }
+        guard totalSearchQueryCharacterCount
+                <= maximumTotalSearchQueryCharacterCount
+        else {
+            throw ValidationFailure.invalidTextCollection
+        }
+
+        let collections = [
+            TextCollection(
+                values: visibleTexts,
+                maximumCount: maximumVisibleTextCount,
+                maximumLength: maximumVisibleTextLength
+            ),
+            TextCollection(
+                values: probableProductNames,
+                maximumCount: maximumNamedEvidenceCount,
+                maximumLength: maximumEvidenceTextLength
+            ),
+            TextCollection(
+                values: probableGenericNames,
+                maximumCount: maximumNamedEvidenceCount,
+                maximumLength: maximumEvidenceTextLength
+            ),
+            TextCollection(
+                values: manufacturerNames,
+                maximumCount: maximumNamedEvidenceCount,
+                maximumLength: maximumEvidenceTextLength
+            ),
+            TextCollection(
+                values: approvalIdentifiers,
+                maximumCount: maximumNamedEvidenceCount,
+                maximumLength: maximumEvidenceTextLength
+            ),
+            TextCollection(
+                values: dosageFormTexts,
+                maximumCount: maximumNamedEvidenceCount,
+                maximumLength: maximumEvidenceTextLength
+            ),
+            TextCollection(
+                values: packagingFeatures,
+                maximumCount: maximumPackagingFeatureCount,
+                maximumLength: maximumPackagingFeatureLength
+            ),
+            TextCollection(
+                values: searchQueries,
+                maximumCount: maximumSearchQueryCount,
+                maximumLength: maximumSearchQueryLength
+            ),
+        ]
+
+        var totalCharacterCount = 0
+        for collection in collections {
+            guard collection.values.count <= collection.maximumCount else {
+                throw ValidationFailure.invalidTextCollection
+            }
+            for value in collection.values {
+                let length = value.count
+                guard !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                      length <= collection.maximumLength,
+                      totalCharacterCount <= maximumTotalCharacterCount - length
+                else {
+                    throw ValidationFailure.invalidTextCollection
+                }
+                totalCharacterCount += length
+            }
+        }
+    }
+
+    private static func decodingError(
+        _ decoder: any Decoder,
+        _ description: String
+    ) -> DecodingError {
+        .dataCorrupted(.init(
+            codingPath: decoder.codingPath,
+            debugDescription: description
+        ))
+    }
+}
+
 private struct ArbitraryCodingKey: CodingKey {
     let stringValue: String
     let intValue: Int?
@@ -237,13 +452,46 @@ struct ZhipuVisionClient:
         from image: VisionImagePayload
     ) async throws -> VisionVisibleTextResult {
         let configuration = runtimeConfiguration.primary
+        let response = try await execute(
+            image: image,
+            instruction: VisionChatCompletionRequestBody.instruction
+        )
+        return try parse(
+            response,
+            as: VisionVisibleTextResult.self,
+            providerIdentifier: configuration.providerIdentifier
+        )
+    }
+
+    func extractMedicinePackageEvidence(
+        from image: VisionImagePayload
+    ) async throws -> RemoteMedicinePackageEvidence {
+        let configuration = runtimeConfiguration.primary
+        let response = try await execute(
+            image: image,
+            instruction: VisionChatCompletionRequestBody
+                .medicinePackageEvidenceInstruction
+        )
+        return try parse(
+            response,
+            as: RemoteMedicinePackageEvidence.self,
+            providerIdentifier: configuration.providerIdentifier
+        )
+    }
+
+    private func execute(
+        image: VisionImagePayload,
+        instruction: String
+    ) async throws -> VisionHTTPResponse {
+        let configuration = runtimeConfiguration.primary
         let provider = configuration.providerIdentifier
         let request: VisionTransportRequest
         do {
             request = try .chatCompletion(
                 configuration: configuration,
                 image: image,
-                credential: runtimeConfiguration.credential
+                credential: runtimeConfiguration.credential,
+                instruction: instruction
             )
         } catch {
             throw ZhipuVisionClientError.invalidRequest(
@@ -289,7 +537,7 @@ struct ZhipuVisionClient:
                 try Task.checkCancellation()
                 continue
             }
-            return try parse(response, providerIdentifier: provider)
+            return response
         }
 
         throw ZhipuVisionClientError.transportFailure(
@@ -317,10 +565,11 @@ struct ZhipuVisionClient:
         )
     }
 
-    private func parse(
+    private func parse<Payload: Decodable>(
         _ response: VisionHTTPResponse,
+        as type: Payload.Type,
         providerIdentifier: String
-    ) throws -> VisionVisibleTextResult {
+    ) throws -> Payload {
         let malformedResponse = ZhipuVisionClientError
             .malformedProviderResponse(providerIdentifier: providerIdentifier)
         guard response.body.count <= Self.maximumProviderResponseBytes else {
@@ -348,7 +597,7 @@ struct ZhipuVisionClient:
         }
         do {
             return try JSONDecoder().decode(
-                VisionVisibleTextResult.self, from: contentData
+                type, from: contentData
             )
         } catch {
             throw invalidPayload

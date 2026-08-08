@@ -8,9 +8,8 @@ import SlowWalkDomain
 /// features. Views and models never construct a clock, a store, or a network
 /// client themselves.
 ///
-/// This stage wires the on-device Vision medicine recognizer and local demo
-/// assessment pipeline. `ios/README.md` records the remaining platform work,
-/// including CoreLocation, protected storage, and speech.
+/// Medicine package recognition is remote-first only when a validated endpoint
+/// is configured. Risk assessment remains in the existing local pipeline.
 @Observable
 @MainActor
 final class AppEnvironment {
@@ -21,6 +20,9 @@ final class AppEnvironment {
     let companion: CompanionSessionModel
     let medicineAssessmentRunner: MedicineAssessmentRunner
     let medicineCaptureSubmitter: MedicineAssessmentCaptureSubmitter
+    let medicineRecognitionPreferences: MedicineRecognitionPreferences
+    let medicineRecognitionServerConfiguration:
+        MedicineRecognitionServerConfiguration
     let currentUserHealthProfile: UserHealthProfile
     let currentMedicationRecords: [MedicationRecord]
 
@@ -28,30 +30,42 @@ final class AppEnvironment {
     ///
     /// Every screen that states a capability reads it from here, or from
     /// `companion.capabilities`, which is this same value. `CapabilityCatalog`
-    /// has no static default anywhere else and no view names `.phase0`: the
-    /// default is chosen once, on this initialiser's parameter, so a test can
-    /// describe a different build by constructing one environment and have the
-    /// whole app — behaviour and wording together — follow it.
+    /// remains injectable for tests. When omitted, production facts are
+    /// derived once from the validated recognition configuration so behaviour
+    /// and wording follow the same catalog.
     let capabilities: CapabilityCatalog
 
     convenience init(
         clock: any SlowWalkDomain.Clock = AppSystemClock(),
         plan: TodayPlan = .demo,
         simulator: MockMedicineScanSimulator = .demo,
-        capabilities: CapabilityCatalog = .phase0
+        capabilities: CapabilityCatalog? = nil,
+        medicineRecognitionPreferences: MedicineRecognitionPreferences =
+            .init(),
+        medicineRecognitionServerConfiguration:
+            MedicineRecognitionServerConfiguration = .init()
     ) {
         let requester = LocalMedicineAssessmentRequester.demo(clock: clock)
+        let effectiveCapabilities = capabilities
+            ?? .medicineRecognitionMainline(
+                onlineRecognitionConfigured:
+                    medicineRecognitionServerConfiguration.baseURL != nil
+            )
         self.init(
             clock: clock,
             plan: plan,
             simulator: simulator,
             readDelay: ContinuousMedicineReadDelay(),
-            capabilities: capabilities,
+            capabilities: effectiveCapabilities,
             medicineRecognizer: AppleVisionMedicineTextRecognizer(),
             medicineRequester: requester,
             medicineConfirmer: requester,
             userHealthProfile: Self.productionDemoUserHealthProfile,
-            medicationRecords: []
+            medicationRecords: [],
+            medicineRecognitionPreferences:
+                medicineRecognitionPreferences,
+            medicineRecognitionServerConfiguration:
+                medicineRecognitionServerConfiguration
         )
     }
 
@@ -65,11 +79,22 @@ final class AppEnvironment {
         medicineRequester: any MedicineAssessmentRequesting,
         medicineConfirmer: (any MedicineCandidateConfirming)?,
         userHealthProfile: UserHealthProfile,
-        medicationRecords: [MedicationRecord]
+        medicationRecords: [MedicationRecord],
+        medicineRecognitionPreferences: MedicineRecognitionPreferences =
+            .init(),
+        medicineRecognitionServerConfiguration:
+            MedicineRecognitionServerConfiguration = .unavailable,
+        onlineMedicineRecognitionRequester:
+            (any OnlineMedicineRecognitionRequesting)? = nil,
+        recognitionRouter: (any MedicineRecognitionRouting)? = nil
     ) {
         self.clock = clock
         self.plan = plan
         self.capabilities = capabilities
+        self.medicineRecognitionPreferences =
+            medicineRecognitionPreferences
+        self.medicineRecognitionServerConfiguration =
+            medicineRecognitionServerConfiguration
         currentUserHealthProfile = userHealthProfile
         currentMedicationRecords = medicationRecords
 
@@ -98,21 +123,59 @@ final class AppEnvironment {
                 "Invalid built-in medicine recognition mapping configuration."
             )
         }
-        let runner = MedicineAssessmentRunner(
-            session: companion,
-            recognizer: medicineRecognizer,
-            mapper: MedicineRecognitionInputMapper(
-                configuration: mappingConfiguration
-            ),
-            requester: medicineRequester,
-            confirmer: medicineConfirmer,
-            clock: clock
+        let mapper = MedicineRecognitionInputMapper(
+            configuration: mappingConfiguration
         )
+        let runner: MedicineAssessmentRunner
+        if let recognitionRouter {
+            runner = MedicineAssessmentRunner(
+                session: companion,
+                recognitionRouter: recognitionRouter,
+                requester: medicineRequester,
+                confirmer: medicineConfirmer,
+                clock: clock
+            )
+        } else if let baseURL =
+            medicineRecognitionServerConfiguration.baseURL
+        {
+            let onlineRequester = onlineMedicineRecognitionRequester
+                ?? URLSessionOnlineMedicineRecognitionRequester(
+                    baseURL: baseURL
+                )
+            runner = MedicineAssessmentRunner(
+                session: companion,
+                recognitionRouter: RemoteFirstMedicineRecognitionRouter(
+                    remoteRequester: onlineRequester,
+                    localRecognizer: medicineRecognizer,
+                    localMapper: mapper
+                ),
+                requester: medicineRequester,
+                confirmer: medicineConfirmer,
+                clock: clock
+            )
+        } else {
+            runner = MedicineAssessmentRunner(
+                session: companion,
+                recognizer: medicineRecognizer,
+                mapper: mapper,
+                requester: medicineRequester,
+                confirmer: medicineConfirmer,
+                clock: clock
+            )
+        }
         medicineAssessmentRunner = runner
+        let remoteRoutingAvailable = recognitionRouter != nil
+            || medicineRecognitionServerConfiguration.baseURL != nil
         medicineCaptureSubmitter = MedicineAssessmentCaptureSubmitter(
             runner: runner,
             userHealthProfileProvider: { userHealthProfile },
-            medicationRecordsProvider: { medicationRecords }
+            medicationRecordsProvider: { medicationRecords },
+            recognitionModeProvider: {
+                guard remoteRoutingAvailable else {
+                    return .onDeviceOnly
+                }
+                return medicineRecognitionPreferences.mode
+            }
         )
     }
 

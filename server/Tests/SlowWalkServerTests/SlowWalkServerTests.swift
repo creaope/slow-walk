@@ -92,7 +92,7 @@ final class SlowWalkServerTests:
         let paths = SlowWalkAPI.Endpoint.allCases
             .map(\.path)
 
-        XCTAssertEqual(Set(paths).count, 4)
+        XCTAssertEqual(Set(paths).count, 5)
         XCTAssertTrue(
             paths.allSatisfy {
                 $0.hasPrefix(

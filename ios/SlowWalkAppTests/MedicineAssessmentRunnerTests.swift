@@ -126,6 +126,284 @@ struct MedicineAssessmentRunnerTests {
         }
     }
 
+    @Test func submitterSnapshotsRecognitionModeOncePerProcess()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(plans: [.resolved])
+        let router = RecordingMedicineRecognitionRouter()
+        let (session, _) = await sessionAtAssessmentGate()
+        let runner = MedicineAssessmentRunner(
+            session: session,
+            recognitionRouter: router,
+            requester: backend,
+            confirmer: backend,
+            clock: AppFixedClock(fixedDate: RunnerFixtures.date)
+        )
+        var selectedMode = MedicineRecognitionMode.remotePreferred
+        var modeReadCount = 0
+        let submitter = MedicineAssessmentCaptureSubmitter(
+            runner: runner,
+            userHealthProfileProvider: { RunnerFixtures.profile },
+            medicationRecordsProvider: { [] },
+            recognitionModeProvider: {
+                modeReadCount += 1
+                defer { selectedMode = .onDeviceOnly }
+                return selectedMode
+            }
+        )
+
+        #expect(
+            try await submitter.process(RunnerFixtures.image)
+                == .submittedForAssessment
+        )
+        await backend.waitForAssessments(1)
+
+        #expect(modeReadCount == 1)
+        #expect(await router.modes == [.remotePreferred])
+        #expect(await waitForGate(session, state: .result))
+    }
+
+    @Test func invalidRemoteProtocolFailureWithoutRequestIDIsPublished()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(plans: [.resolved])
+        let router = RecordingMedicineRecognitionRouter(
+            failure: .invalidResponse
+        )
+        let (session, _) = await sessionAtAssessmentGate()
+        let runner = MedicineAssessmentRunner(
+            session: session,
+            recognitionRouter: router,
+            requester: backend,
+            confirmer: backend,
+            clock: AppFixedClock(fixedDate: RunnerFixtures.date)
+        )
+        let invocation = runner.makeAssessmentInvocation(
+            imageInput: RunnerFixtures.image,
+            userProfile: RunnerFixtures.profile,
+            mode: .remotePreferred
+        )
+
+        #expect(await runner.start(invocation))
+        #expect(await waitForGate(session, state: .failure))
+        guard case .failed(let failure) =
+            session.assessmentGate?.assessmentState
+        else {
+            Issue.record("Expected the current protocol failure.")
+            return
+        }
+        #expect(failure.kind == .malformedResponse)
+        #expect(failure.requestID == nil)
+        #expect(await backend.requests.isEmpty)
+    }
+
+    @Test func configuredEnvironmentUsesRemoteRecognitionOnlyForImage()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(plans: [.resolved])
+        let localRecognizer = CountingMedicineRecognizer()
+        let onlineRequester = RecordingOnlineMedicineRecognitionRequester()
+        let preferenceFixture = try RunnerRecognitionPreferencesFixture()
+        defer { preferenceFixture.remove() }
+        let baseURL = try #require(
+            URL(string: "https://recognition.example/slowwalk/")
+        )
+        let configuration = MedicineRecognitionServerConfiguration(
+            explicitBaseURL: baseURL,
+            environment: [:],
+            infoDictionary: [:]
+        )
+        let environment = makeProductionEnvironment(
+            backend: backend,
+            recognizer: localRecognizer,
+            preferences: preferenceFixture.preferences,
+            serverConfiguration: configuration,
+            onlineRecognitionRequester: onlineRequester
+        )
+        try await enterProductionAssessmentGate(environment.companion)
+
+        #expect(
+            try await environment.medicineCaptureSubmitter.process(
+                RunnerFixtures.image
+            ) == .submittedForAssessment
+        )
+        await backend.waitForAssessments(1)
+        #expect(await waitForGate(environment.companion, state: .result))
+
+        #expect(await onlineRequester.requests.count == 1)
+        #expect(await onlineRequester.requests.first?.image == RunnerFixtures.image)
+        #expect(await localRecognizer.callCount == 0)
+        #expect(
+            await backend.requests.first?.userProfile.id
+                == RunnerFixtures.profile.id
+        )
+        guard case .result(let result) =
+            environment.companion.assessmentGate?.assessmentState
+        else {
+            Issue.record("Expected the remote canonical result.")
+            return
+        }
+        #expect(result.recognitionContext == .remote)
+    }
+
+    @Test func missingEndpointIgnoresInjectedOnlineRequesterAndStaysLocal()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(plans: [.resolved])
+        let localRecognizer = CountingMedicineRecognizer()
+        let onlineRequester = RecordingOnlineMedicineRecognitionRequester()
+        let preferenceFixture = try RunnerRecognitionPreferencesFixture()
+        defer { preferenceFixture.remove() }
+        let environment = makeProductionEnvironment(
+            backend: backend,
+            recognizer: localRecognizer,
+            preferences: preferenceFixture.preferences,
+            serverConfiguration: .unavailable,
+            onlineRecognitionRequester: onlineRequester
+        )
+        try await enterProductionAssessmentGate(environment.companion)
+
+        #expect(
+            try await environment.medicineCaptureSubmitter.process(
+                RunnerFixtures.image
+            ) == .submittedForAssessment
+        )
+        await backend.waitForAssessments(1)
+        #expect(await waitForGate(environment.companion, state: .result))
+
+        #expect(await onlineRequester.requests.isEmpty)
+        #expect(await localRecognizer.callCount == 1)
+        guard case .result(let result) =
+            environment.companion.assessmentGate?.assessmentState
+        else {
+            Issue.record("Expected the local canonical result.")
+            return
+        }
+        #expect(result.recognitionContext == .onDeviceOnly)
+    }
+
+    @Test func configuredServerFailureFallsBackToLocalRecognition()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(plans: [.resolved])
+        let localRecognizer = CountingMedicineRecognizer()
+        let onlineRequester = RecordingOnlineMedicineRecognitionRequester(
+            plan: .failure(.serverUnavailable)
+        )
+        let preferenceFixture = try RunnerRecognitionPreferencesFixture()
+        defer { preferenceFixture.remove() }
+        let configuration = try configuredRecognitionServer()
+        let environment = makeProductionEnvironment(
+            backend: backend,
+            recognizer: localRecognizer,
+            preferences: preferenceFixture.preferences,
+            serverConfiguration: configuration,
+            onlineRecognitionRequester: onlineRequester
+        )
+        try await enterProductionAssessmentGate(environment.companion)
+
+        #expect(
+            try await environment.medicineCaptureSubmitter.process(
+                RunnerFixtures.image
+            ) == .submittedForAssessment
+        )
+        await backend.waitForAssessments(1)
+        #expect(await waitForGate(environment.companion, state: .result))
+
+        #expect(await onlineRequester.requests.count == 1)
+        #expect(await localRecognizer.callCount == 1)
+        #expect(await backend.requests.count == 1)
+        guard case .result(let result) =
+            environment.companion.assessmentGate?.assessmentState
+        else {
+            Issue.record("Expected the local fallback result.")
+            return
+        }
+        #expect(result.recognitionContext.source == .localFallback)
+        #expect(
+            result.recognitionContext.fallbackReason
+                == .serverUnavailable
+        )
+    }
+
+    @Test func configuredAmbiguousResultIsNotCoveredByLocalGuess()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(plans: [.resolved])
+        let localRecognizer = CountingMedicineRecognizer()
+        let onlineRequester = RecordingOnlineMedicineRecognitionRequester(
+            plan: .failure(.ambiguous)
+        )
+        let preferenceFixture = try RunnerRecognitionPreferencesFixture()
+        defer { preferenceFixture.remove() }
+        let environment = makeProductionEnvironment(
+            backend: backend,
+            recognizer: localRecognizer,
+            preferences: preferenceFixture.preferences,
+            serverConfiguration: try configuredRecognitionServer(),
+            onlineRecognitionRequester: onlineRequester
+        )
+        try await enterProductionAssessmentGate(environment.companion)
+
+        #expect(
+            try await environment.medicineCaptureSubmitter.process(
+                RunnerFixtures.image
+            ) == .submittedForAssessment
+        )
+        #expect(
+            await waitForGate(environment.companion, state: .confirmation)
+        )
+
+        #expect(await onlineRequester.requests.count == 1)
+        #expect(await localRecognizer.callCount == 0)
+        #expect(await backend.requests.isEmpty)
+        guard case .requiresMedicineConfirmation(let requirement) =
+            environment.companion.assessmentGate?.assessmentState
+        else {
+            Issue.record("Expected the remote ambiguity to remain visible.")
+            return
+        }
+        #expect(requirement.reason == .ambiguousMedicine)
+        #expect(requirement.recognitionContext == .remote)
+    }
+
+    @Test func configuredEnvironmentHonorsOnDeviceOnlyPreference()
+        async throws
+    {
+        let backend = ControlledMedicineBackend(plans: [.resolved])
+        let localRecognizer = CountingMedicineRecognizer()
+        let onlineRequester = RecordingOnlineMedicineRecognitionRequester()
+        let preferenceFixture = try RunnerRecognitionPreferencesFixture()
+        defer { preferenceFixture.remove() }
+        preferenceFixture.preferences.onDeviceOnly = true
+        let environment = makeProductionEnvironment(
+            backend: backend,
+            recognizer: localRecognizer,
+            preferences: preferenceFixture.preferences,
+            serverConfiguration: try configuredRecognitionServer(),
+            onlineRecognitionRequester: onlineRequester
+        )
+        try await enterProductionAssessmentGate(environment.companion)
+
+        #expect(
+            try await environment.medicineCaptureSubmitter.process(
+                RunnerFixtures.image
+            ) == .submittedForAssessment
+        )
+        await backend.waitForAssessments(1)
+        #expect(await waitForGate(environment.companion, state: .result))
+
+        #expect(await onlineRequester.requests.isEmpty)
+        #expect(await localRecognizer.callCount == 1)
+        guard case .result(let result) =
+            environment.companion.assessmentGate?.assessmentState
+        else {
+            Issue.record("Expected the on-device result.")
+            return
+        }
+        #expect(result.recognitionContext == .onDeviceOnly)
+    }
+
     @Test func submitterRejectsUnavailableGateBeforeOCR() async throws {
         let backend = ControlledMedicineBackend(plans: [.resolved])
         let recognizer = CountingMedicineRecognizer()
@@ -409,17 +687,23 @@ struct MedicineAssessmentRunnerTests {
         #expect(session.assessmentGate?.latestUpdate == accepted)
     }
 
-    @Test func mismatchedResponseRequestIDIsRejected() async throws {
+    @Test func mismatchedResponsePublishesSafeProtocolFailure() async throws {
         let backend = ControlledMedicineBackend(
             plans: [.mismatchedResponse(RunnerFixtures.foreignRequestID)]
         )
         let (runner, session) = try await makeRunner(backend: backend)
 
         await runner.start(try makeAssessmentInvocation(runner))
-        await repeatedlyYield()
+        #expect(await waitForGate(session, state: .failure))
 
-        #expect(session.assessmentGate?.assessmentState.isAssessing == true)
-        #expect(session.assessmentGate?.assessmentState.isResult == false)
+        guard case .failed(let failure) =
+            session.assessmentGate?.assessmentState
+        else {
+            Issue.record("Expected a safe response-validation failure.")
+            return
+        }
+        #expect(failure.kind == .malformedResponse)
+        #expect(failure.requestID == nil)
     }
 
     @Test func mismatchedFailureRequestIDIsRejected() async throws {
@@ -578,6 +862,7 @@ struct MedicineAssessmentRunnerTests {
                 )
             )
         )
+        #expect(await waitForGate(session, state: .result))
         guard case .result(let result) = session.assessmentGate?.assessmentState else {
             Issue.record("Expected confirmed result.")
             return
@@ -1061,7 +1346,13 @@ private func makeRunner(
 private func makeProductionEnvironment(
     backend: ControlledMedicineBackend,
     recognizer: any MedicineTextRecognizing,
-    medicationRecords: [MedicationRecord] = []
+    medicationRecords: [MedicationRecord] = [],
+    preferences: MedicineRecognitionPreferences = .init(),
+    serverConfiguration: MedicineRecognitionServerConfiguration =
+        .unavailable,
+    onlineRecognitionRequester:
+        (any OnlineMedicineRecognitionRequesting)? = nil,
+    recognitionRouter: (any MedicineRecognitionRouting)? = nil
 ) -> AppEnvironment {
     AppEnvironment(
         clock: AppFixedClock(fixedDate: RunnerFixtures.date),
@@ -1077,7 +1368,11 @@ private func makeProductionEnvironment(
         medicineRequester: backend,
         medicineConfirmer: backend,
         userHealthProfile: RunnerFixtures.profile,
-        medicationRecords: medicationRecords
+        medicationRecords: medicationRecords,
+        medicineRecognitionPreferences: preferences,
+        medicineRecognitionServerConfiguration: serverConfiguration,
+        onlineMedicineRecognitionRequester: onlineRecognitionRequester,
+        recognitionRouter: recognitionRouter
     )
 }
 
@@ -1089,6 +1384,19 @@ private func enterProductionAssessmentGate(
     try #require(session.beginMedicineCaptureAssessment())
     #expect(session.assessmentGate?.preAssessmentSelection == nil)
     try #require(session.currentAssessmentGateLease != nil)
+}
+
+private func configuredRecognitionServer() throws
+    -> MedicineRecognitionServerConfiguration
+{
+    let baseURL = try #require(
+        URL(string: "https://recognition.example/slowwalk/")
+    )
+    return MedicineRecognitionServerConfiguration(
+        explicitBaseURL: baseURL,
+        environment: [:],
+        infoDictionary: [:]
+    )
 }
 
 @MainActor
@@ -1408,6 +1716,92 @@ private actor CountingMedicineRecognizer: MedicineTextRecognizing {
         callCount += 1
         inputs.append(input)
         return try await StaticMedicineRecognizer().recognizeText(in: input)
+    }
+}
+
+private actor RecordingMedicineRecognitionRouter:
+    MedicineRecognitionRouting
+{
+    private let failure: OnlineMedicineRecognitionFailure?
+    private(set) var modes: [MedicineRecognitionMode] = []
+
+    init(failure: OnlineMedicineRecognitionFailure? = nil) {
+        self.failure = failure
+    }
+
+    func recognize(
+        imageInput: OCRImageInput,
+        requestID: UUID,
+        mode: MedicineRecognitionMode
+    ) async throws -> MedicineRecognitionRoutingOutcome {
+        modes.append(mode)
+        if let failure { throw failure }
+        return MedicineRecognitionRoutingOutcome(
+            recognitionInput: MedicineRecognitionInput(
+                recognizedTexts: ["Test Medicine"],
+                capturedAt: imageInput.capturedAt,
+                languageCode: "en",
+                rawConfidence: 0.99
+            ),
+            source: .remote
+        )
+    }
+}
+
+private actor RecordingOnlineMedicineRecognitionRequester:
+    OnlineMedicineRecognitionRequesting
+{
+    enum Plan: Sendable {
+        case success
+        case failure(OnlineMedicineRecognitionFailure)
+    }
+
+    private let plan: Plan
+    private(set) var requests: [OnlineMedicineRecognitionRequest] = []
+
+    init(plan: Plan = .success) {
+        self.plan = plan
+    }
+
+    func recognize(
+        request: OnlineMedicineRecognitionRequest
+    ) async throws -> OnlineMedicineRecognitionResult {
+        requests.append(request)
+        if case .failure(let failure) = plan {
+            throw failure
+        }
+        return OnlineMedicineRecognitionResult(
+            requestID: request.requestID,
+            recognitionInput: MedicineRecognitionInput(
+                recognizedTexts: ["Test Medicine"],
+                capturedAt: request.image.capturedAt,
+                languageCode: "en",
+                rawConfidence: 0.99
+            ),
+            expectedCanonicalMedicineID:
+                RunnerFixtures.candidateA.medicine.id,
+            expectedCanonicalMedicineName:
+                RunnerFixtures.candidateA.medicine.canonicalName
+        )
+    }
+}
+
+@MainActor
+private struct RunnerRecognitionPreferencesFixture {
+    let preferences: MedicineRecognitionPreferences
+    private let defaults: UserDefaults
+    private let suiteName: String
+
+    init() throws {
+        suiteName =
+            "com.creaope.slowwalk.tests.runner-recognition.\(UUID())"
+        defaults = try #require(UserDefaults(suiteName: suiteName))
+        defaults.removePersistentDomain(forName: suiteName)
+        preferences = MedicineRecognitionPreferences(defaults: defaults)
+    }
+
+    func remove() {
+        defaults.removePersistentDomain(forName: suiteName)
     }
 }
 

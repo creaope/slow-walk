@@ -71,7 +71,7 @@ struct VisionImagePayload:
 // MARK: - OpenAI-compatible request body
 
 /// Encodable mirror of the OpenAI-compatible chat-completions request used to
-/// ask a provider for visible-text evidence only.
+/// ask a provider for one of the gateway's bounded visual-evidence contracts.
 struct VisionChatCompletionRequestBody: Encodable, Sendable {
     struct ImageURL: Encodable, Sendable {
         let url: String
@@ -136,13 +136,38 @@ struct VisionChatCompletionRequestBody: Encodable, Sendable {
         Add no other keys and no prose outside the JSON object.
         """
 
-    init(model: String, image: VisionImagePayload) {
+    /// Evidence-only contract used for medicine package inspection. Product
+    /// and generic names remain search clues; the provider must never select a
+    /// canonical medicine or make a clinical judgement.
+    static let medicinePackageEvidenceInstruction = """
+        Inspect only the visible medicine packaging in this image. Reply with \
+        one complete JSON object and no Markdown, code fence, or surrounding \
+        prose. The object must contain exactly these keys: \
+        "visibleTexts", "probableProductNames", "probableGenericNames", \
+        "manufacturerNames", "approvalIdentifiers", "dosageFormTexts", \
+        "packagingFeatures", and "searchQueries" as arrays of strings; and \
+        "imageReadable" and "uncertainRegionsPresent" as booleans. Preserve \
+        literally visible text in "visibleTexts". Put only visually supported \
+        packaging evidence or bounded catalog-search clues in the other \
+        arrays. Product and generic names are hypotheses, not canonical facts. \
+        Use empty arrays when no evidence is present. Do not return a canonical \
+        medicine ID, selected medicine, risk level, diagnosis, dosage or \
+        frequency advice, treatment duration, stop-medication advice, \
+        safe-to-take judgement, action card, or user health judgement. Add no \
+        other keys.
+        """
+
+    init(
+        model: String,
+        image: VisionImagePayload,
+        instruction: String = Self.instruction
+    ) {
         self.model = model
         messages = [
             Message(
                 role: "user",
                 content: [
-                    .text(Self.instruction),
+                    .text(instruction),
                     .imageURL(
                         ImageURL(url: image.dataURIString)
                     ),
@@ -235,7 +260,8 @@ struct VisionTransportRequest:
     static func chatCompletion(
         configuration: VisionProviderConfiguration,
         image: VisionImagePayload,
-        credential: VisionCredential
+        credential: VisionCredential,
+        instruction: String = VisionChatCompletionRequestBody.instruction
     ) throws -> VisionTransportRequest {
         guard !image.data.isEmpty else {
             throw VisionRequestError.emptyImageData
@@ -256,7 +282,8 @@ struct VisionTransportRequest:
         let body = try encoder.encode(
             VisionChatCompletionRequestBody(
                 model: configuration.model,
-                image: image
+                image: image,
+                instruction: instruction
             )
         )
         return VisionTransportRequest(
