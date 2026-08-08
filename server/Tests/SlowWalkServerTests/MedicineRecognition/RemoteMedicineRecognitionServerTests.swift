@@ -707,6 +707,39 @@ final class RemoteMedicineRecognitionServerTests:
         )
     }
 
+    /// The service timeout budget must accommodate the full provider retry
+    /// surface: requestTimeout × maxAttempts plus the cumulative retry-delay
+    /// budget, so the last attempt has room to succeed before the service
+    /// cancels the extraction.
+    func testServiceTimeoutExceedsFullProviderRetryBudget() throws {
+        let configuration = try VisionProviderConfiguration(
+            providerIdentifier: "budget-check",
+            baseURL: URL(string: "https://vision.example.com/v1")!,
+            model: "test"
+        )
+        let perRequest = configuration.requestTimeout
+        let maxAttempts = configuration.maxAttempts
+
+        // Retry delay rule: retryNumber × 50 ms.
+        // Retries fire after attempt 1 and 2 (not after the last).
+        let retryDelayBudget = Duration.milliseconds(
+            (1 ..< maxAttempts).reduce(0) { $0 + $1 * 50 }
+        )
+
+        let worstCase = Duration.seconds(
+            perRequest * Double(maxAttempts)
+        ) + retryDelayBudget
+
+        XCTAssertGreaterThan(
+            RemoteMedicineRecognitionService.defaultTimeout,
+            worstCase,
+            "Service timeout (\(RemoteMedicineRecognitionService.defaultTimeout)) "
+                + "must exceed \(maxAttempts) attempts × "
+                + "\(perRequest)s + "
+                + "retry-delay budget (\(retryDelayBudget))."
+        )
+    }
+
     private func makeApplication(
         extractor: any MedicinePackageEvidenceExtracting,
         logger: Logger? = nil

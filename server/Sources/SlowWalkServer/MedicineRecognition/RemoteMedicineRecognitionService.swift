@@ -18,7 +18,7 @@ enum RemoteMedicineRecognitionServiceError:
 struct RemoteMedicineRecognitionService: Sendable {
     typealias TimeoutTask = @Sendable () async throws -> Void
 
-    static let defaultTimeout: Duration = .seconds(35)
+    static let defaultTimeout: Duration = .seconds(95)
 
     private let extractor: any MedicinePackageEvidenceExtracting
     private let resolver: RemoteMedicineCandidateResolver

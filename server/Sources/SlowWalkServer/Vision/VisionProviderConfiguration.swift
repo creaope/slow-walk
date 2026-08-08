@@ -47,10 +47,9 @@ struct VisionProviderConfiguration:
         providerIdentifier: String,
         baseURL: URL,
         model: String,
-        requestTimeout: TimeInterval = 30,
+        requestTimeout: TimeInterval = 45,
         maxImageBytes: Int = 4 * 1_024 * 1_024,
-        maxAttempts: Int =
-            VisionProviderConfiguration.maximumSupportedAttempts,
+        maxAttempts: Int = 2,
         allowedMimeTypes: Set<String> =
             VisionProviderConfiguration.defaultAllowedMimeTypes
     ) throws {
