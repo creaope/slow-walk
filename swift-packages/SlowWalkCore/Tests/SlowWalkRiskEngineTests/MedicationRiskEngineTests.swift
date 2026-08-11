@@ -39,6 +39,35 @@ final class MedicationRiskEngineTests: XCTestCase {
         XCTAssertTrue(assessment.requiresFamilyAttention)
     }
 
+    func testCanonicalMedicineNameInAllergyProfileReturnsRed() {
+        let profile = makeProfile(allergies: [" demo medicine a "])
+        let assessment = MedicationRiskEngine().assess(
+            context: makeContext(profile: profile)
+        )
+
+        XCTAssertEqual(assessment.level, .red)
+        XCTAssertTrue(assessment.reasons.map(\.code).contains(.allergyMatch))
+    }
+
+    func testSourcedMedicineAliasInAllergyProfileReturnsRed() {
+        let profile = makeProfile(allergies: [" MEDICINE A "])
+        let assessment = MedicationRiskEngine().assess(
+            context: makeContext(profile: profile)
+        )
+
+        XCTAssertEqual(assessment.level, .red)
+        XCTAssertTrue(assessment.reasons.map(\.code).contains(.allergyMatch))
+    }
+
+    func testAllergyIdentityMatchDoesNotUseSubstrings() {
+        let profile = makeProfile(allergies: ["medicine"])
+        let assessment = MedicationRiskEngine().assess(
+            context: makeContext(profile: profile)
+        )
+
+        XCTAssertFalse(assessment.reasons.map(\.code).contains(.allergyMatch))
+    }
+
     func testDuplicateActiveIngredientReturnsRed() {
         let profile = makeProfile(
             currentMedicineIngredientIDs: ["ingredient-a"]

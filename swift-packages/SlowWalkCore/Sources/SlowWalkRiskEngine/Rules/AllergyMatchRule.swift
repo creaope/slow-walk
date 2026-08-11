@@ -1,6 +1,12 @@
 import SlowWalkDomain
 
-/// Raises a red reminder when a normalized allergy matches medicine labels.
+/// Raises a red reminder when a normalized allergy exactly matches sourced
+/// medicine identity or an existing canonical safety label.
+///
+/// Product names are included because an allergy record may identify a
+/// pharmaceutical product rather than only an ingredient. Matching remains an
+/// exact set intersection after case and surrounding-whitespace normalization;
+/// this rule intentionally performs no substring, fuzzy, or drug-class match.
 public struct AllergyMatchRule: MedicationRiskRule {
     public let identifier = "allergy-match"
 
@@ -9,7 +15,10 @@ public struct AllergyMatchRule: MedicationRiskRule {
     public func evaluate(context: MedicationRiskContext) -> RiskFinding? {
         let allergies = RuleSupport.normalizedSet(context.userProfile.allergies)
         let medicineLabels = RuleSupport.normalizedSet(
-            context.medicine.contraindicationTags + context.medicine.activeIngredientIDs
+            [context.medicine.canonicalName]
+                + context.medicine.aliases
+                + context.medicine.contraindicationTags
+                + context.medicine.activeIngredientIDs
         )
         let matches = allergies.intersection(medicineLabels).sorted()
 
